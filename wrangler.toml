@@ -1,0 +1,53 @@
+name = "iptv-api"
+main = "workers/src/index.ts"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+# Uncomment to set your account ID
+# account_id = "YOUR_ACCOUNT_ID"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "iptv-db"
+database_id = "YOUR_D1_DATABASE_ID"
+
+[[kv_namespaces]]
+binding = "KV"
+id = "YOUR_KV_NAMESPACE_ID"
+
+[[durable_objects.bindings]]
+name = "CHANNEL_ROOM"
+class_name = "ChannelRoom"
+
+[[durable_objects.bindings]]
+name = "SITE_PRESENCE"
+class_name = "SitePresence"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["ChannelRoom", "SitePresence"]
+
+[triggers]
+crons = [
+  "0 */6 * * *",   # KV cache refresh every 6 hours
+  "* * * * *"       # Push notification sender every minute
+]
+
+[vars]
+TOTP_ISSUER_NAME = "IPTV Stream"
+FRONTEND_URL = "https://your-pages-domain.pages.dev"
+
+# Secrets (set via `wrangler secret put`):
+# JWT_SECRET
+# VAPID_PUBLIC_KEY
+# VAPID_PRIVATE_KEY
+# VAPID_SUBJECT
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "iptv-db"
+database_id = "YOUR_D1_DATABASE_ID"
+
+[[env.production.kv_namespaces]]
+binding = "KV"
+id = "YOUR_KV_NAMESPACE_ID"
