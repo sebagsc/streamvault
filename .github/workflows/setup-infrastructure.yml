@@ -26,7 +26,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Install Wrangler
         run: npm install -g wrangler
@@ -38,7 +38,7 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           echo "Creating D1 database 'iptv-db'..."
-          wrangler d1 create iptv-db --yes || echo "Database may already exist"
+          wrangler d1 create iptv-db 2>/dev/null || true
           echo ""
           echo "Listing databases:"
           wrangler d1 list
@@ -55,10 +55,10 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           echo "Creating KV namespace 'KV'..."
-          wrangler kv:namespace create KV --yes || echo "Namespace may already exist"
+          wrangler kv namespace create KV 2>/dev/null || true
           echo ""
           echo "Listing namespaces:"
-          wrangler kv:namespace list
+          wrangler kv namespace list
           echo ""
           echo "=========================================="
           echo "IMPORTANTE: Copia el 'id' de arriba"
