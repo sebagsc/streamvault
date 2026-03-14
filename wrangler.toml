@@ -37,8 +37,10 @@ main = "workers/src/index.ts"
 compatibility_date = "2024-09-23"
 compatibility_flags = ["nodejs_compat"]
 
-# === REEMPLAZA ESTO CON TU ACCOUNT ID ===
-# account_id = "f99f865c4525df962a429c132ec94303"
+# ============================================
+# ACCOUNT ID
+# ============================================
+account_id = "f99f865c4525df962a429c132ec94303"
 
 # ============================================
 # D1 DATABASE
@@ -46,23 +48,23 @@ compatibility_flags = ["nodejs_compat"]
 [[d1_databases]]
 binding = "DB"
 database_name = "iptv-db"
-database_id = "YOUR_D1_DATABASE_ID"
+database_id = "ae6d0626-caa7-41cd-8b9e-ae3b6a6c5f72"
 
 [[env.production.d1_databases]]
 binding = "DB"
 database_name = "iptv-db"
-database_id = "YOUR_D1_DATABASE_ID"
+database_id = "ae6d0626-caa7-41cd-8b9e-ae3b6a6c5f72"
 
 # ============================================
 # KV NAMESPACE
 # ============================================
 [[kv_namespaces]]
 binding = "KV"
-id = "YOUR_KV_NAMESPACE_ID"
+id = "362b3112719548f3afdec6f4fe5b3517"
 
 [[env.production.kv_namespaces]]
 binding = "KV"
-id = "YOUR_KV_NAMESPACE_ID"
+id = "362b3112719548f3afdec6f4fe5b3517"
 
 # NOTA: Durable Objects removidos para mantener plan gratuito
 # El chat y presencia ahora usan polling HTTP + D1
