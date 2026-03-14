@@ -2,7 +2,8 @@
 title StreamVault - Setup Git + GitHub Deploy
 chcp 65001 >nul
 color 0B
-setlocal EnableDelayedExpansion
+
+REM IMPORTANTE: No usar setlocal EnableDelayedExpansion aqui porque causa problemas con caracteres especiales en tokens
 
 echo ==========================================
 echo   StreamVault - Setup Git + GitHub Deploy
@@ -14,7 +15,7 @@ echo   2. Crear/conectar tu repositorio en GitHub
 echo   3. Subir tu codigo
 echo.
 echo NOTA: Para crear la infraestructura (D1, KV) usaras GitHub Actions.
-echo       Lee SETUP-NO-LOCAL-TOOLS.md para mas detalles.
+echo       Lee SETUP-FREE.md para mas detalles.
 echo.
 pause
 echo.
@@ -40,21 +41,21 @@ REM ============================================
 echo --- Configuracion de Git Local ---
 echo.
 
-for /f "delims=" %%a in ('git config --global user.name 2^>nul') do set CURRENT_NAME=%%a
-for /f "delims=" %%a in ('git config --global user.email 2^>nul') do set CURRENT_EMAIL=%%a
+for /f "delims=" %%a in ('git config --global user.name 2^>nul') do set "CURRENT_NAME=%%a"
+for /f "delims=" %%a in ('git config --global user.email 2^>nul') do set "CURRENT_EMAIL=%%a"
 
-if not "!CURRENT_NAME!"=="" (
-    echo Nombre actual: !CURRENT_NAME!
+if not "%CURRENT_NAME%"=="" (
+    echo Nombre actual: %CURRENT_NAME%
     set /p GIT_NAME="Nuevo nombre (Enter para mantener): "
-    if "!GIT_NAME!"=="" set GIT_NAME=!CURRENT_NAME!
+    if "%GIT_NAME%"=="" set "GIT_NAME=%CURRENT_NAME%"
 ) else (
     set /p GIT_NAME="Tu nombre completo: "
 )
 
-if not "!CURRENT_EMAIL!"=="" (
-    echo Email actual: !CURRENT_EMAIL!
+if not "%CURRENT_EMAIL%"=="" (
+    echo Email actual: %CURRENT_EMAIL%
     set /p GIT_EMAIL="Nuevo email (Enter para mantener): "
-    if "!GIT_EMAIL!"=="" set GIT_EMAIL=!CURRENT_EMAIL!
+    if "%GIT_EMAIL%"=="" set "GIT_EMAIL=%CURRENT_EMAIL%"
 ) else (
     set /p GIT_EMAIL="Tu email: "
 )
@@ -64,8 +65,8 @@ set /p GITHUB_USER="Tu usuario de GitHub: "
 echo.
 
 REM Configurar Git
-git config --global user.name "!GIT_NAME!"
-git config --global user.email "!GIT_EMAIL!"
+git config --global user.name "%GIT_NAME%"
+git config --global user.email "%GIT_EMAIL%"
 echo [OK] Git configurado
 echo.
 
@@ -75,17 +76,14 @@ REM ============================================
 echo --- Configuracion del Repositorio ---
 echo.
 
-for %%I in (.) do set REPO_NAME=%%~nxI
-if "!REPO_NAME!"=="." set REPO_NAME=streamvault
+for %%I in (.) do set "REPO_NAME=%%~nxI"
+if "%REPO_NAME%"=="." set "REPO_NAME=streamvault"
 
-set /p REPO_NAME="Nombre del repositorio [!REPO_NAME!]: "
-if "!REPO_NAME!"=="" (
-    for %%I in (.) do set REPO_NAME=%%~nxI
-    if "!REPO_NAME!"=="." set REPO_NAME=streamvault
-)
+set /p REPO_NAME_INPUT="Nombre del repositorio [%REPO_NAME%]: "
+if not "%REPO_NAME_INPUT%"=="" set "REPO_NAME=%REPO_NAME_INPUT%"
 
 echo.
-echo Repositorio objetivo: https://github.com/!GITHUB_USER!/!REPO_NAME!
+echo Repositorio objetivo: https://github.com/%GITHUB_USER%/%REPO_NAME%
 echo.
 
 REM ============================================
@@ -143,7 +141,7 @@ echo.
 
 REM Eliminar remote existente y crear nuevo
 git remote remove origin 2>nul
-git remote add origin https://github.com/!GITHUB_USER!/!REPO_NAME!.git
+git remote add origin https://github.com/%GITHUB_USER%/%REPO_NAME%.git
 echo [OK] Remote configurado
 
 echo.
@@ -151,19 +149,19 @@ echo IMPORTANTE: Si el repositorio no existe en GitHub todavia,
 echo debes crearlo primero en: https://github.com/new
 echo.
 echo Configuracion recomendada:
-echo   - Repository name: !REPO_NAME!
+echo   - Repository name: %REPO_NAME%
 echo   - Description: StreamVault IPTV Platform
 echo   - Public o Private: Como prefieras
 echo   - UNCHECK: Add a README file
 echo   - UNCHECK: Add .gitignore
 echo   - UNCHECK: Choose a license
 echo.
-set /p REPO_CREATED="¿Ya creaste el repositorio en GitHub? (s/n): "
+set /p REPO_CREATED="Ya creaste el repositorio en GitHub? (s/n): "
 
-if /I not "!REPO_CREATED!"=="s" (
+if /I not "%REPO_CREATED%"=="s" (
     echo.
     echo Por favor crea el repositorio primero:
-    echo   https://github.com/new?name=!REPO_NAME!
+    echo   https://github.com/new?name=%REPO_NAME%
     echo.
     echo Luego vuelve a ejecutar este script.
     pause
@@ -178,11 +176,15 @@ echo --- Subiendo codigo a GitHub ---
 echo.
 echo Metodos de autenticacion:
 echo   [1] Token de acceso personal (Classic) - RECOMENDADO
-echo   [2] Autenticacion interactiva del navegador
+echo   [2] Usar Git Credential Manager (interactivo)
 echo.
 set /p AUTH_METHOD="Elige metodo (1 o 2): "
 
-if "!AUTH_METHOD!"=="1" (
+if "%AUTH_METHOD%"=="1" (
+    echo.
+    echo ==========================================
+    echo   AUTENTICACION CON TOKEN
+    echo ==========================================
     echo.
     echo Necesitas un Personal Access Token (Classic) de GitHub.
     echo.
@@ -195,9 +197,19 @@ if "!AUTH_METHOD!"=="1" (
     echo   6. Click "Generate token"
     echo   7. COPIA EL TOKEN AHORA (solo se muestra una vez)
     echo.
-    set /p GITHUB_TOKEN="Pega tu GitHub Token: "
+    echo IMPORTANTE: El token empieza con 'ghp_' y es muy largo
+    echo.
     
-    if "!GITHUB_TOKEN!"=="" (
+    REM Crear archivo temporal para el token (para manejar caracteres especiales)
+    set "TOKEN_FILE=%TEMP%\github_token_%RANDOM%.txt"
+    
+    echo Pega tu GitHub Token y presiona Enter:
+    set /p GITHUB_TOKEN=""
+    
+    REM Guardar token en variable
+    set "GH_TOKEN=%GITHUB_TOKEN%"
+    
+    if "%GH_TOKEN%"=="" (
         echo [ERROR] No ingresaste un token
         pause
         exit /b 1
@@ -205,9 +217,17 @@ if "!AUTH_METHOD!"=="1" (
     
     echo.
     echo Subiendo con token...
-    git push -u https://!GITHUB_TOKEN!@github.com/!GITHUB_USER!/!REPO_NAME!.git main
+    echo.
     
-    if errorlevel 1 (
+    REM Usar el token en la URL (manera mas confiable)
+    git push -u https://%GH_TOKEN%@github.com/%GITHUB_USER%/%REPO_NAME%.git main
+    
+    set "PUSH_RESULT=%ERRORLEVEL%"
+    
+    REM Limpiar variable
+    set "GH_TOKEN="
+    
+    if %PUSH_RESULT% neq 0 (
         echo.
         echo [ERROR] No se pudo subir el codigo
         echo.
@@ -216,14 +236,21 @@ if "!AUTH_METHOD!"=="1" (
         echo   - El token es incorrecto o expiro
         echo   - El token no tiene permisos de 'repo'
         echo.
+        echo Intenta con el metodo 2 o verifica tu token.
         pause
         exit /b 1
     )
     
 ) else (
     echo.
+    echo ==========================================
+    echo   AUTENTICACION INTERACTIVA
+    echo ==========================================
+    echo.
     echo Se abrira una ventana para autenticarte con GitHub.
-    echo Despues de autenticarte, el push continuara.
+    echo Si es la primera vez, Git te pedira tus credenciales.
+    echo.
+    echo Tip: Usa tu token de GitHub como contrasena cuando lo solicite.
     echo.
     pause
     
@@ -233,11 +260,7 @@ if "!AUTH_METHOD!"=="1" (
         echo.
         echo [ERROR] No se pudo subir el codigo
         echo.
-        echo Posibles causas:
-        echo   - El repositorio no existe
-        echo   - Problema de autenticacion
-        echo.
-        echo Intenta usar la opcion 1 (Token) en su lugar.
+        echo Intenta usar el metodo 1 (Token) en su lugar.
         pause
         exit /b 1
     )
@@ -248,18 +271,18 @@ REM SUCCESS
 REM ============================================
 echo.
 echo ==========================================
-echo   ¡CODIGO SUBIDO EXITOSAMENTE!
+echo   CODIGO SUBIDO EXITOSAMENTE!
 echo ==========================================
 echo.
 echo Tu codigo esta en:
-echo https://github.com/!GITHUB_USER!/!REPO_NAME!
+echo https://github.com/%GITHUB_USER%/%REPO_NAME%
 echo.
 echo ==========================================
 echo   SIGUIENTES PASOS
 echo ==========================================
 echo.
 echo 1. Abre tu repositorio en GitHub
-echo    https://github.com/!GITHUB_USER!/!REPO_NAME!
+echo    https://github.com/%GITHUB_USER%/%REPO_NAME%
 echo.
 echo 2. Ve a Settings ^> Secrets and variables ^> Actions
 echo    Agrega estos secrets:
@@ -267,9 +290,10 @@ echo.
 echo      CLOUDFLARE_API_TOKEN      (de Cloudflare Dashboard)
 echo      CLOUDFLARE_ACCOUNT_ID     (de Cloudflare Dashboard)
 echo      VITE_API_URL              (temporal: https://placeholder.workers.dev/api)
-echo      VITE_WS_URL               (temporal: wss://placeholder.workers.dev)
 echo.
-echo 3. Lee SETUP-NO-LOCAL-TOOLS.md para continuar
+echo    NOTA: VITE_WS_URL NO es necesario en la version gratuita
+echo.
+echo 3. Lee SETUP-FREE.md para continuar con el setup
 echo.
 echo 4. Los workflows de GitHub Actions haran el resto:
 echo    - Crearan D1 y KV
@@ -277,9 +301,9 @@ echo    - Aplicaran el schema
 echo    - Deployaran el Worker y Frontend
 echo.
 
-set /p OPEN_BROWSER="¿Deseas abrir tu repositorio en el navegador? (s/n): "
-if /I "!OPEN_BROWSER!"=="s" (
-    start https://github.com/!GITHUB_USER!/!REPO_NAME!
+set /p OPEN_BROWSER="Deseas abrir tu repositorio en el navegador? (s/n): "
+if /I "%OPEN_BROWSER%"=="s" (
+    start https://github.com/%GITHUB_USER%/%REPO_NAME%
 )
 
 echo.
