@@ -110,19 +110,22 @@ jobs:
         run: |
           echo "Verificando configuracion..."
           
-          # Verificar que los IDs esten configurados
-          if grep -q "YOUR_D1_DATABASE_ID" wrangler.toml; then
+          # Verificar que los IDs esten configurados (no sean los placeholders)
+          if grep -q 'database_id = "YOUR' wrangler.toml; then
             echo "ERROR: database_id no configurado en wrangler.toml"
+            echo "Por favor actualiza el archivo con el ID real de tu base de datos D1"
             exit 1
           fi
           
-          if grep -q "YOUR_KV_NAMESPACE_ID" wrangler.toml; then
+          if grep -q 'id = "YOUR' wrangler.toml; then
             echo "ERROR: KV id no configurado en wrangler.toml"
+            echo "Por favor actualiza el archivo con el ID real de tu KV namespace"
             exit 1
           fi
           
-          if grep -q "YOUR_ACCOUNT_ID" wrangler.toml; then
+          if grep -q '# account_id' wrangler.toml || grep -q 'account_id = "YOUR' wrangler.toml; then
             echo "ERROR: account_id no configurado en wrangler.toml"
+            echo "Por favor actualiza el archivo con tu Cloudflare Account ID"
             exit 1
           fi
           
