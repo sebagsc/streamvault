@@ -131,7 +131,7 @@ jobs:
           
           echo "Instalando dependencias..."
           cd workers
-          npm ci
+          npm install
           
           echo "Deployando Worker..."
           wrangler deploy
