@@ -135,12 +135,7 @@ jobs:
           npm install
           
           echo "Deployando Worker..."
-          if [ -n "$CLOUDFLARE_EMAIL" ]; then
-            echo "Using email authentication..."
-            wrangler deploy --api-token "$CLOUDFLARE_API_TOKEN"
-          else
-            wrangler deploy
-          fi
+          wrangler deploy
           
           echo ""
           echo "=========================================="
