@@ -1,4 +1,8 @@
--- IPTV Streaming Platform — D1 Database Schema
+-- IPTV Streaming Platform — D1 Database Schema (100% Gratis - Sin Durable Objects)
+
+-- ============================================
+-- TABLAS PRINCIPALES
+-- ============================================
 
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
@@ -86,7 +90,35 @@ CREATE TABLE IF NOT EXISTS recently_watched (
   PRIMARY KEY (user_id, channel_id)
 );
 
--- Indexes
+-- ============================================
+-- TABLAS PARA CHAT Y PRESENCIA (POLLING)
+-- ============================================
+
+-- Sesiones activas de usuarios (para presencia)
+CREATE TABLE IF NOT EXISTS user_sessions (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  channel_id TEXT,              -- NULL si no está viendo ningún canal
+  username TEXT NOT NULL,
+  is_admin INTEGER DEFAULT 0,
+  last_active TEXT DEFAULT (datetime('now')),
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+-- Mensajes de chat
+CREATE TABLE IF NOT EXISTS chat_messages (
+  id TEXT PRIMARY KEY,
+  channel_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  username TEXT NOT NULL,
+  message TEXT NOT NULL,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+-- ============================================
+-- INDEXES
+-- ============================================
+
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 CREATE INDEX IF NOT EXISTS idx_invite_links_token ON invite_links(token);
 CREATE INDEX IF NOT EXISTS idx_custom_streams_channel ON custom_streams(channel_id);
@@ -96,3 +128,16 @@ CREATE INDEX IF NOT EXISTS idx_event_subs_event ON event_subscriptions(event_id)
 CREATE INDEX IF NOT EXISTS idx_push_subs_user ON push_subscriptions(user_id);
 CREATE INDEX IF NOT EXISTS idx_recently_watched_user ON recently_watched(user_id);
 CREATE INDEX IF NOT EXISTS idx_health_reports_url ON stream_health_reports(stream_url);
+
+-- Indexes para chat y presencia
+CREATE INDEX IF NOT EXISTS idx_sessions_channel ON user_sessions(channel_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_user ON user_sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_last_active ON user_sessions(last_active);
+CREATE INDEX IF NOT EXISTS idx_chat_channel ON chat_messages(channel_id);
+CREATE INDEX IF NOT EXISTS idx_chat_created ON chat_messages(created_at);
+
+-- ============================================
+-- LIMPIEZA AUTOMÁTICA DE SESIONES INACTIVAS
+-- ============================================
+-- Nota: En D1 no hay triggers, así que la limpieza se hace vía código
+-- Las sesiones inactivas por más de 5 minutos se consideran "offline"

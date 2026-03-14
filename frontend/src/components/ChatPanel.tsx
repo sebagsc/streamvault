@@ -1,50 +1,72 @@
 import { useState, useEffect, useRef } from 'react';
-import type { ChannelWebSocket, WsMessage } from '../lib/websocket';
+import type { ChannelPolling, ChatMessage } from '../lib/polling';
 
-interface ChatMessage {
+interface Props {
+  polling: ChannelPolling | null;
+  className?: string;
+}
+
+interface DisplayMessage {
   userId: string;
   username: string;
   message: string;
   timestamp: number;
 }
 
-interface Props {
-  ws: ChannelWebSocket | null;
-  className?: string;
+interface PresenceUser {
+  id: string;
+  username: string;
 }
 
-export default function ChatPanel({ ws, className = '' }: Props) {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+export default function ChatPanel({ polling, className = '' }: Props) {
+  const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [input, setInput] = useState('');
-  const [presence, setPresence] = useState<{ id: string; username: string }[]>([]);
+  const [presence, setPresence] = useState<PresenceUser[]>([]);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (!ws) return;
-    const unsub = ws.onMessage((msg: WsMessage) => {
-      if (msg.type === 'chat') {
-        setMessages((prev) => {
-          const next = [...prev, { userId: msg.userId, username: msg.username, message: msg.message, timestamp: msg.timestamp }];
-          return next.slice(-200); // keep last 200
-        });
-      } else if (msg.type === 'presence') {
-        setPresence(msg.users);
-      }
+    if (!polling) return;
+    
+    const unsubChat = polling.onChat((newMessages: ChatMessage[]) => {
+      setMessages((prev) => {
+        const converted = newMessages.map((m) => ({
+          userId: m.user_id,
+          username: m.username,
+          message: m.message,
+          timestamp: new Date(m.created_at).getTime(),
+        }));
+        const combined = [...prev, ...converted];
+        // Eliminar duplicados por id (si viene de diferentes polls)
+        const unique = combined.filter((msg, index, self) => 
+          index === self.findIndex((m) => m.timestamp === msg.timestamp && m.userId === msg.userId && m.message === msg.message)
+        );
+        return unique.slice(-200); // keep last 200
+      });
     });
-    return unsub;
-  }, [ws]);
+
+    const unsubPresence = polling.onPresence((info) => {
+      setPresence(info.users.map((u) => ({ id: u.user_id, username: u.username })));
+    });
+
+    return () => {
+      unsubChat();
+      unsubPresence();
+    };
+  }, [polling]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const sendMessage = () => {
+  const sendMessage = async () => {
     const text = input.trim();
-    if (!text || !ws) return;
-    ws.sendChat(text);
-    setInput('');
-    inputRef.current?.focus();
+    if (!text || !polling) return;
+    const success = await polling.sendChat(text);
+    if (success) {
+      setInput('');
+      inputRef.current?.focus();
+    }
   };
 
   const handleKey = (e: React.KeyboardEvent) => {

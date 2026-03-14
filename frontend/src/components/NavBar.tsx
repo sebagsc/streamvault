@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 import { useChannelStore } from '../store/channelStore';
 import { events as eventsApi } from '../lib/api';
+import { SitePresencePolling } from '../lib/polling';
 
 interface NavBarProps {
   onFiltersToggle?: () => void;
@@ -22,10 +23,14 @@ export default function NavBar({ onFiltersToggle }: NavBarProps) {
       setUnread(data.filter((e) => e.subscribed).length);
     }).catch(() => {});
 
-    // Fetch site total
-    fetch('/api/presence').then((r) => r.json()).then((d: { total: number }) => {
-      setSiteTotal(d.total);
-    }).catch(() => {});
+    // Polling para conteo de usuarios (versión gratuita)
+    const sitePresence = new SitePresencePolling();
+    sitePresence.onTotal((total) => setSiteTotal(total));
+    sitePresence.start();
+
+    return () => {
+      sitePresence.stop();
+    };
   }, []);
 
   useEffect(() => {

@@ -1,0 +1,169 @@
+name: Setup Cloudflare Infrastructure
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Action to perform'
+        required: true
+        default: 'setup-all'
+        type: choice
+        options:
+          - setup-all
+          - create-d1
+          - create-kv
+          - apply-schema
+          - deploy-worker
+
+jobs:
+  setup-infrastructure:
+    name: Setup Cloudflare Resources
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Wrangler
+        run: npm install -g wrangler
+
+      - name: Create D1 Database
+        if: github.event.inputs.action == 'create-d1' || github.event.inputs.action == 'setup-all'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          echo "Creating D1 database 'iptv-db'..."
+          wrangler d1 create iptv-db --yes || echo "Database may already exist"
+          echo ""
+          echo "Listing databases:"
+          wrangler d1 list
+          echo ""
+          echo "=========================================="
+          echo "IMPORTANTE: Copia el 'database_id' de arriba"
+          echo "y actualiza wrangler.toml"
+          echo "=========================================="
+
+      - name: Create KV Namespace
+        if: github.event.inputs.action == 'create-kv' || github.event.inputs.action == 'setup-all'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          echo "Creating KV namespace 'KV'..."
+          wrangler kv:namespace create KV --yes || echo "Namespace may already exist"
+          echo ""
+          echo "Listing namespaces:"
+          wrangler kv:namespace list
+          echo ""
+          echo "=========================================="
+          echo "IMPORTANTE: Copia el 'id' de arriba"
+          echo "y actualiza wrangler.toml"
+          echo "=========================================="
+
+      - name: Apply Database Schema
+        if: github.event.inputs.action == 'apply-schema' || github.event.inputs.action == 'setup-all'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          echo "Applying database schema..."
+          
+          # Extraer database_id del wrangler.toml
+          DB_ID=$(grep -A 3 "\[\[d1_databases\]\]" wrangler.toml | grep "database_id" | head -1 | cut -d'"' -f2)
+          
+          if [ "$DB_ID" = "YOUR_D1_DATABASE_ID" ] || [ -z "$DB_ID" ]; then
+            echo "ERROR: Por favor actualiza database_id en wrangler.toml primero!"
+            echo "Valor actual: $DB_ID"
+            echo ""
+            echo "Pasos:"
+            echo "  1. Ejecuta este workflow con 'create-d1'"
+            echo "  2. Copia el database_id de los logs"
+            echo "  3. Edita wrangler.toml y reemplaza YOUR_D1_DATABASE_ID"
+            echo "  4. Commit y push"
+            echo "  5. Vuelve a ejecutar con 'apply-schema'"
+            exit 1
+          fi
+          
+          echo "Usando database_id: $DB_ID"
+          wrangler d1 execute iptv-db --file=schema.sql --remote --yes
+          
+          echo ""
+          echo "=========================================="
+          echo "Schema aplicado exitosamente!"
+          echo "Tablas creadas:"
+          echo "  - users, invite_links, custom_streams"
+          echo "  - events, push_subscriptions, etc."
+          echo "  - user_sessions (presencia)"
+          echo "  - chat_messages (chat)"
+          echo "=========================================="
+
+      - name: Deploy Worker
+        if: github.event.inputs.action == 'deploy-worker' || github.event.inputs.action == 'setup-all'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          echo "Verificando configuracion..."
+          
+          # Verificar que los IDs esten configurados
+          if grep -q "YOUR_D1_DATABASE_ID" wrangler.toml; then
+            echo "ERROR: database_id no configurado en wrangler.toml"
+            exit 1
+          fi
+          
+          if grep -q "YOUR_KV_NAMESPACE_ID" wrangler.toml; then
+            echo "ERROR: KV id no configurado en wrangler.toml"
+            exit 1
+          fi
+          
+          if grep -q "YOUR_ACCOUNT_ID" wrangler.toml; then
+            echo "ERROR: account_id no configurado en wrangler.toml"
+            exit 1
+          fi
+          
+          echo "Instalando dependencias..."
+          cd workers
+          npm ci
+          
+          echo "Deployando Worker..."
+          wrangler deploy
+          
+          echo ""
+          echo "=========================================="
+          echo "Worker deployado exitosamente!"
+          echo ""
+          echo "URLs del Worker:"
+          echo "  API: https://iptv-api.<tu-subdomain>.workers.dev/api"
+          echo "  Health: https://iptv-api.<tu-subdomain>.workers.dev/api/health"
+          echo ""
+          echo "IMPORTANTE: Configura los secrets en el Dashboard:"
+          echo "  Dashboard → Workers & Pages → iptv-api → Settings → Variables"
+          echo ""
+          echo "Secrets requeridos:"
+          echo "  - JWT_SECRET"
+          echo "  - VAPID_PUBLIC_KEY"
+          echo "  - VAPID_PRIVATE_KEY"
+          echo "  - VAPID_SUBJECT"
+          echo "=========================================="
+
+      - name: Summary
+        run: |
+          echo ""
+          echo "=========================================="
+          echo "  Setup Completado!"
+          echo "=========================================="
+          echo ""
+          echo "Este proyecto usa el plan GRATUITO de Cloudflare:"
+          echo "  ✓ Workers: 100,000 requests/dia"
+          echo "  ✓ Pages: Ilimitado"
+          echo "  ✓ D1: 5M queries/mes"
+          echo "  ✓ KV: 1GB storage"
+          echo ""
+          echo "NOTA: Sin Durable Objects (requieren plan pago)"
+          echo "El chat y presencia usan polling HTTP + D1"
+          echo ""

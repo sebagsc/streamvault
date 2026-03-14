@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { usePlayerStore } from '../store/playerStore';
 import { useAuthStore } from '../store/authStore';
 import { createHlsPlayer } from '../lib/hls';
-import { ChannelWebSocket } from '../lib/websocket';
+import { ChannelPolling } from '../lib/polling';
 import { channels as channelsApi, streams as streamsApi } from '../lib/api';
 import ChatPanel from './ChatPanel';
 import type Hls from 'hls.js';
@@ -13,7 +13,7 @@ export default function PlayerModal() {
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<Hls | null>(null);
-  const wsRef = useRef<ChannelWebSocket | null>(null);
+  const pollingRef = useRef<ChannelPolling | null>(null);
 
   const [chatOpen, setChatOpen] = useState(true);
   const [presence, setPresence] = useState<{ id: string; username: string }[]>([]);
@@ -56,32 +56,30 @@ export default function PlayerModal() {
     };
   }, [channel?.id, streamIndex]);
 
-  // WebSocket for presence + chat
+  // Polling for presence + chat (versión gratuita - sin WebSockets)
   useEffect(() => {
     if (!channel || !user) return;
 
-    wsRef.current?.disconnect();
+    pollingRef.current?.stop();
 
     const username = user.display_name || user.email.split('@')[0];
-    const ws = new ChannelWebSocket(
+    const polling = new ChannelPolling(
       channel.id,
       user.id,
       username,
       user.role === 'admin'
     );
-    ws.connect();
-    wsRef.current = ws;
+    polling.start();
+    pollingRef.current = polling;
 
-    const unsub = ws.onMessage((msg) => {
-      if (msg.type === 'presence') {
-        setPresence(msg.users);
-      }
+    const unsub = polling.onPresence((info) => {
+      setPresence(info.users.map((u) => ({ id: u.user_id, username: u.username })));
     });
 
     return () => {
       unsub();
-      ws.disconnect();
-      wsRef.current = null;
+      polling.stop();
+      pollingRef.current = null;
     };
   }, [channel?.id]);
 
@@ -248,7 +246,7 @@ export default function PlayerModal() {
         {/* Chat panel */}
         {chatOpen && (
           <div className="w-full md:w-72 shrink-0 h-48 md:h-full border-t md:border-t-0 border-surface-border">
-            <ChatPanel ws={wsRef.current} className="h-full" />
+            <ChatPanel polling={pollingRef.current} className="h-full" />
           </div>
         )}
       </div>

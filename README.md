@@ -4,76 +4,84 @@ A private, invite-only IPTV streaming web app built on the Cloudflare stack.
 
 ---
 
+## 🚀 Opciones de Instalación
+
+### ✅ Opción Recomendada: 100% Gratuito (Sin Durable Objects)
+Esta versión usa **polling HTTP** en lugar de WebSockets, permitiendo usar el **plan gratuito** de Cloudflare:
+
+- Workers: 100,000 requests/día
+- Pages: Ilimitado
+- D1: 5M queries/mes
+- KV: 1GB storage
+
+**👉 Sigue: [SETUP-FREE.md](SETUP-FREE.md)**
+
+### Alternativa: Con Durable Objects (requiere plan pago $5+/mes)
+Si necesitas chat en tiempo real con WebSockets:
+
+- **[SETUP-NO-LOCAL-TOOLS.md](SETUP-NO-LOCAL-TOOLS.md)** - Sin instalar nada localmente
+- **[SETUP.md](SETUP.md)** - Con Node.js + Wrangler CLI
+
+---
+
 ## GitHub → Cloudflare Pages (CI/CD)
 
-The repo includes a GitHub Actions workflow (`.github/workflows/deploy.yml`) that on every push to `main`:
-1. Deploys the Cloudflare Worker (`workers/`)
-2. Builds the frontend and deploys it to Cloudflare Pages (`frontend/dist`)
+El repositorio incluye GitHub Actions workflows que automatizan el deploy:
 
-### Required GitHub Secrets
+| Workflow | Descripción | Cuándo corre |
+|----------|-------------|--------------|
+| `deploy.yml` | Deploy Worker + Frontend | Automático en cada push a `main` |
+| `setup-infrastructure.yml` | Crear D1, KV, aplicar schema | Manual (primera vez) |
 
-Go to your repo → **Settings → Secrets and variables → Actions** and add:
+### Secrets Requeridos en GitHub
 
-| Secret | How to get it |
-|--------|--------------|
-| `CLOUDFLARE_API_TOKEN` | Cloudflare dashboard → My Profile → API Tokens → Create Token → "Edit Cloudflare Workers" template |
-| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare dashboard → right sidebar when viewing any domain |
-| `VITE_API_URL` | `https://iptv-api.YOUR-SUBDOMAIN.workers.dev/api` |
-| `VITE_WS_URL` | `wss://iptv-api.YOUR-SUBDOMAIN.workers.dev` |
+Ve a tu repo → **Settings → Secrets and variables → Actions** y agrega:
 
-> The API token needs **Workers:Edit**, **Pages:Edit**, **D1:Edit**, and **KV:Edit** permissions.
+| Secret | Cómo obtenerlo | Requerido en versión |
+|--------|---------------|---------------------|
+| `CLOUDFLARE_API_TOKEN` | Cloudflare Dashboard → My Profile → API Tokens → Create Token → "Edit Cloudflare Workers" template | Ambas |
+| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare Dashboard → sidebar derecho | Ambas |
+| `VITE_API_URL` | URL de tu Worker + `/api` | Ambas |
+| `VITE_WS_URL` | URL WebSocket (ej: `wss://...`) | Solo con Durable Objects |
 
-### Worker secrets (one-time, from your machine)
+> El API token necesita permisos: **Workers:Edit**, **Pages:Edit**, **D1:Edit**, **KV:Edit**
 
-These are sensitive and must be set manually via Wrangler — they are never stored in git:
+### Secrets del Worker (sensibles)
 
+Configura en **Cloudflare Dashboard** → Workers & Pages → iptv-api → Settings → Variables:
+
+| Secret | Descripción |
+|--------|-------------|
+| `JWT_SECRET` | String aleatorio para firmar tokens (genera en random.org) |
+| `VAPID_PUBLIC_KEY` | Para Web Push (genera en web-push-codelab.glitch.me) |
+| `VAPID_PRIVATE_KEY` | Par de la clave pública |
+| `VAPID_SUBJECT` | `mailto:tu-email@ejemplo.com` |
+| `FRONTEND_URL` | `https://iptv-frontend.pages.dev` |
+
+**Nota:** Estos secrets también pueden configurarse vía Wrangler CLI si lo tienes instalado:
 ```bash
 cd workers
 wrangler secret put JWT_SECRET
 wrangler secret put VAPID_PUBLIC_KEY
-wrangler secret put VAPID_PRIVATE_KEY
-wrangler secret put VAPID_SUBJECT
-wrangler secret put FRONTEND_URL
-# FRONTEND_URL = https://iptv-frontend.pages.dev  (your Pages domain)
+# ... etc
 ```
-
-### First-time infra setup (once, from your machine)
-
-Before the first GitHub deploy you must create the Cloudflare resources:
-
-```bash
-# 1. D1 database
-wrangler d1 create iptv-db
-# → paste the database_id into wrangler.toml
-
-# 2. Run schema migration
-wrangler d1 execute iptv-db --file=schema.sql
-
-# 3. KV namespace
-wrangler kv:namespace create KV
-# → paste the id into wrangler.toml
-
-# 4. Create the Pages project (only needed once)
-cd frontend && npm run build
-wrangler pages project create iptv-frontend
-```
-
-After that, every push to `main` triggers a full deploy automatically.
 
 ---
 
 ## Stack
 
-| Layer | Technology |
+| Layer | Technology (Versión Gratuita) |
 |---|---|
 | Frontend | React 18 + Vite + Tailwind CSS |
 | Hosting | Cloudflare Pages |
 | Backend | Cloudflare Workers (Hono router) |
 | Database | Cloudflare D1 (SQLite) |
 | Cache | Cloudflare KV |
-| Real-time | Cloudflare Durable Objects (WebSockets) |
+| Real-time | **Polling HTTP** (alternativa gratuita a WebSockets) |
 | Cron | Workers Cron Triggers |
 | Push | Web Push API + VAPID + Service Worker |
+
+> **Nota:** La versión gratuita usa polling HTTP cada 3s para chat y cada 10-30s para presencia, en lugar de WebSockets (que requieren Durable Objects de pago).
 
 ---
 

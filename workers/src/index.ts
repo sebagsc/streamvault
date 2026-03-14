@@ -8,12 +8,11 @@ import streamsRoutes from './routes/streams';
 import eventsRoutes from './routes/events';
 import pushRoutes from './routes/push';
 import metaRoutes from './routes/meta';
+import chatRoutes from './routes/chat';
+import presenceRoutes from './routes/presence';
 import { runKvRefresh } from './cron/kvRefresh';
 import { runPushSender } from './cron/pushSender';
 import type { Env } from './types';
-
-export { ChannelRoom } from './durable-objects/ChannelRoom';
-export { SitePresence } from './durable-objects/SitePresence';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -32,38 +31,6 @@ app.use('*', async (c, next) => {
 // Health check
 app.get('/api/health', (c) => c.json({ ok: true, ts: Date.now() }));
 
-// WebSocket endpoint for channel rooms
-app.get('/api/ws/:channelId', async (c) => {
-  const { channelId } = c.req.param();
-  const upgradeHeader = c.req.header('Upgrade');
-  if (upgradeHeader !== 'websocket') {
-    return c.text('Expected WebSocket upgrade', 426);
-  }
-
-  const userId = c.req.query('userId') ?? 'anon';
-  const username = c.req.query('username') ?? 'Anonymous';
-  const isAdmin = c.req.query('isAdmin') === 'true';
-
-  const id = c.env.CHANNEL_ROOM.idFromName(channelId);
-  const room = c.env.CHANNEL_ROOM.get(id);
-
-  const url = new URL(c.req.url);
-  url.searchParams.set('channelId', channelId);
-  url.searchParams.set('userId', userId);
-  url.searchParams.set('username', username);
-  url.searchParams.set('isAdmin', isAdmin ? 'true' : 'false');
-
-  return room.fetch(new Request(url.toString(), c.req.raw));
-});
-
-// Site presence count
-app.get('/api/presence', async (c) => {
-  const id = c.env.SITE_PRESENCE.idFromName('global');
-  const presence = c.env.SITE_PRESENCE.get(id);
-  const resp = await presence.fetch('http://internal/total');
-  return resp;
-});
-
 // API routes
 app.route('/api/auth', authRoutes);
 app.route('/api/invite', inviteRoutes);
@@ -73,6 +40,8 @@ app.route('/api/streams', streamsRoutes);
 app.route('/api/events', eventsRoutes);
 app.route('/api/push', pushRoutes);
 app.route('/api/meta', metaRoutes);
+app.route('/api/chat', chatRoutes);           // Polling chat endpoints
+app.route('/api/presence', presenceRoutes);   // Polling presence endpoints
 
 // Admin: seed initial admin user
 app.post('/api/admin/seed', async (c) => {

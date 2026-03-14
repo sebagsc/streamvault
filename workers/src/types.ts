@@ -1,8 +1,13 @@
+// ============================================
+// VERSION 100% GRATIS - Sin Durable Objects
+// Usa polling HTTP en lugar de WebSockets
+// ============================================
+
 export interface Env {
   DB: D1Database;
   KV: KVNamespace;
-  CHANNEL_ROOM: DurableObjectNamespace;
-  SITE_PRESENCE: DurableObjectNamespace;
+  // Nota: Durable Objects removidos para mantener plan gratuito
+  // Se usa polling HTTP + D1 para chat y presencia
   JWT_SECRET: string;
   TOTP_ISSUER_NAME: string;
   VAPID_PUBLIC_KEY: string;

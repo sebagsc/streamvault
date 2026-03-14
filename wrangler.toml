@@ -1,53 +1,97 @@
+# ============================================
+# StreamVault - Cloudflare Workers Configuration
+# VERSION 100% GRATIS (Free Tier)
+# ============================================
+# 
+# STACK GRATUITO:
+# - Cloudflare Workers: 100,000 requests/dia
+# - Cloudflare Pages: Ilimitado
+# - D1 Database: 5M queries/mes
+# - KV: 1GB storage, 10M reads/mes
+#
+# NOTA: Sin Durable Objects (requieren plan de pago)
+# Chat y presencia usan polling HTTP + D1
+#
+# INSTRUCCIONES DE CONFIGURACION:
+#
+# 1. Reemplaza YOUR_ACCOUNT_ID con tu Cloudflare Account ID
+#    → Obtener: https://dash.cloudflare.com (sidebar derecho)
+#
+# 2. Sube este archivo a GitHub
+#
+# 3. Ve a GitHub → Actions → "Setup Cloudflare Infrastructure"
+#    → Click "Run workflow" → Selecciona "setup-all"
+#
+# 4. Copia los IDs que aparecen en los logs
+#
+# 5. Reemplaza aquí:
+#    - YOUR_D1_DATABASE_ID → el uuid de iptv-db
+#    - YOUR_KV_NAMESPACE_ID → el id de KV
+#
+# 6. Sube los cambios y ejecuta "apply-schema" y "deploy-worker"
+#
+# ============================================
+
 name = "iptv-api"
 main = "workers/src/index.ts"
 compatibility_date = "2024-09-23"
 compatibility_flags = ["nodejs_compat"]
 
-# Uncomment to set your account ID
-# account_id = "YOUR_ACCOUNT_ID"
+# === REEMPLAZA ESTO CON TU ACCOUNT ID ===
+# account_id = "f99f865c4525df962a429c132ec94303"
 
+# ============================================
+# D1 DATABASE
+# ============================================
 [[d1_databases]]
 binding = "DB"
 database_name = "iptv-db"
 database_id = "YOUR_D1_DATABASE_ID"
-
-[[kv_namespaces]]
-binding = "KV"
-id = "YOUR_KV_NAMESPACE_ID"
-
-[[durable_objects.bindings]]
-name = "CHANNEL_ROOM"
-class_name = "ChannelRoom"
-
-[[durable_objects.bindings]]
-name = "SITE_PRESENCE"
-class_name = "SitePresence"
-
-[[migrations]]
-tag = "v1"
-new_classes = ["ChannelRoom", "SitePresence"]
-
-[triggers]
-crons = [
-  "0 */6 * * *",   # KV cache refresh every 6 hours
-  "* * * * *"       # Push notification sender every minute
-]
-
-[vars]
-TOTP_ISSUER_NAME = "IPTV Stream"
-FRONTEND_URL = "https://your-pages-domain.pages.dev"
-
-# Secrets (set via `wrangler secret put`):
-# JWT_SECRET
-# VAPID_PUBLIC_KEY
-# VAPID_PRIVATE_KEY
-# VAPID_SUBJECT
 
 [[env.production.d1_databases]]
 binding = "DB"
 database_name = "iptv-db"
 database_id = "YOUR_D1_DATABASE_ID"
 
+# ============================================
+# KV NAMESPACE
+# ============================================
+[[kv_namespaces]]
+binding = "KV"
+id = "YOUR_KV_NAMESPACE_ID"
+
 [[env.production.kv_namespaces]]
 binding = "KV"
 id = "YOUR_KV_NAMESPACE_ID"
+
+# NOTA: Durable Objects removidos para mantener plan gratuito
+# El chat y presencia ahora usan polling HTTP + D1
+
+# ============================================
+# CRON TRIGGERS
+# ============================================
+[triggers]
+crons = [
+  "0 */6 * * *",   # KV cache refresh every 6 hours
+  "* * * * *"       # Push notification sender every minute
+]
+
+# ============================================
+# ENVIRONMENT VARIABLES (NO SENSITIVES)
+# ============================================
+[vars]
+TOTP_ISSUER_NAME = "IPTV Stream"
+FRONTEND_URL = "https://your-pages-domain.pages.dev"
+
+# ============================================
+# SECRETS (configurar en Cloudflare Dashboard)
+# Dashboard: Workers & Pages → iptv-api → Settings → Variables
+#
+# Variables a agregar (como "Secrets" encriptados):
+#
+#   JWT_SECRET          → Genera en https://www.random.org/strings/
+#   VAPID_PUBLIC_KEY    → Genera en https://web-push-codelab.glitch.me/
+#   VAPID_PRIVATE_KEY   → Par de la clave pública
+#   VAPID_SUBJECT       → mailto:tu-email@ejemplo.com
+#
+# ============================================
