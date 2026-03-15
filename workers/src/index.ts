@@ -100,33 +100,8 @@ app.post('/api/admin/refresh-kv', async (c) => {
     await runKvRefresh(c.env.KV);
     return c.json({ ok: true, message: 'Refresh completed' });
   } catch (err: any) {
-    return c.json({ ok: false, error: err.message, stack: err.stack }, 500);
+    return c.json({ ok: false, error: err.message }, 500);
   }
-});
-
-// Admin: debug fetch test for sources
-app.post('/api/admin/debug-fetch', async (c) => {
-  const { secret } = await c.req.json<{ secret: string }>();
-  if (secret !== c.env.JWT_SECRET) {
-    return c.json({ error: 'Invalid secret' }, 403);
-  }
-  const sources = [
-    { name: 'xumo', url: 'https://www.apsattv.com/xumo.m3u' },
-    { name: 'roku', url: 'https://www.apsattv.com/rok.m3u' },
-    { name: 'vizio', url: 'https://www.apsattv.com/vizio.m3u' },
-    { name: 'lg', url: 'https://www.apsattv.com/lg.m3u' },
-  ];
-  const results: Record<string, any> = {};
-  for (const s of sources) {
-    try {
-      const res = await fetch(s.url, { headers: { 'User-Agent': 'StreamVault/1.0' } });
-      const text = await res.text();
-      results[s.name] = { status: res.status, size: text.length, first100: text.substring(0, 100) };
-    } catch (err: any) {
-      results[s.name] = { error: err.message };
-    }
-  }
-  return c.json(results);
 });
 
 // Admin: trigger KV refresh (JWT-authenticated, for admin panel)
