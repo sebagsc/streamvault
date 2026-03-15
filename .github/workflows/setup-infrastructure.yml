@@ -19,6 +19,9 @@ jobs:
   setup-infrastructure:
     name: Setup Cloudflare Resources
     runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -28,61 +31,59 @@ jobs:
         with:
           node-version: '22'
 
+      - name: Install Wrangler Globally
+        run: npm install -g wrangler@latest
+
+      - name: Verify Authentication
+        run: |
+          echo "Verificando autenticacion..."
+          wrangler whoami || echo "Auth check completed"
+
       - name: Create D1 Database
         if: github.event.inputs.action == 'create-d1' || github.event.inputs.action == 'setup-all'
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: d1 create iptv-db
-        continue-on-error: true
-
-      - name: List D1 Databases
-        if: github.event.inputs.action == 'create-d1' || github.event.inputs.action == 'setup-all'
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: d1 list
+        run: |
+          echo "Creating D1 database 'iptv-db'..."
+          wrangler d1 create iptv-db 2>/dev/null || echo "Database may already exist"
+          echo ""
+          echo "Listing databases:"
+          wrangler d1 list
+          echo ""
+          echo "=========================================="
+          echo "IMPORTANTE: Copia el 'database_id' de arriba"
+          echo "y actualiza wrangler.toml"
+          echo "=========================================="
 
       - name: Create KV Namespace
         if: github.event.inputs.action == 'create-kv' || github.event.inputs.action == 'setup-all'
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: kv namespace create KV
-        continue-on-error: true
-
-      - name: List KV Namespaces
-        if: github.event.inputs.action == 'create-kv' || github.event.inputs.action == 'setup-all'
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: kv namespace list
+        run: |
+          echo "Creating KV namespace 'KV'..."
+          wrangler kv namespace create KV 2>/dev/null || echo "Namespace may already exist"
+          echo ""
+          echo "Listing namespaces:"
+          wrangler kv namespace list
+          echo ""
+          echo "=========================================="
+          echo "IMPORTANTE: Copia el 'id' de arriba"
+          echo "y actualiza wrangler.toml"
+          echo "=========================================="
 
       - name: Check wrangler.toml Configuration
         if: github.event.inputs.action == 'apply-schema' || github.event.inputs.action == 'deploy-worker' || github.event.inputs.action == 'setup-all'
         run: |
           echo "Verificando configuracion..."
           
-          # Verificar que los IDs esten configurados (no sean los placeholders)
           if grep -q 'database_id = "YOUR' wrangler.toml; then
             echo "ERROR: database_id no configurado en wrangler.toml"
-            echo "Por favor actualiza el archivo con el ID real de tu base de datos D1"
             exit 1
           fi
           
           if grep -q 'id = "YOUR' wrangler.toml; then
             echo "ERROR: KV id no configurado en wrangler.toml"
-            echo "Por favor actualiza el archivo con el ID real de tu KV namespace"
             exit 1
           fi
           
           if grep -q '# account_id' wrangler.toml || grep -q 'account_id = "YOUR' wrangler.toml; then
             echo "ERROR: account_id no configurado en wrangler.toml"
-            echo "Por favor actualiza el archivo con tu Cloudflare Account ID"
             exit 1
           fi
           
@@ -90,11 +91,11 @@ jobs:
 
       - name: Apply Database Schema
         if: github.event.inputs.action == 'apply-schema' || github.event.inputs.action == 'setup-all'
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: d1 execute iptv-db --file=schema.sql --remote --yes
+        run: |
+          echo "Applying database schema..."
+          wrangler d1 execute iptv-db --file=schema.sql --remote --yes
+          echo ""
+          echo "Schema aplicado exitosamente!"
 
       - name: Install Worker Dependencies
         if: github.event.inputs.action == 'deploy-worker' || github.event.inputs.action == 'setup-all'
@@ -103,32 +104,18 @@ jobs:
 
       - name: Deploy Worker
         if: github.event.inputs.action == 'deploy-worker' || github.event.inputs.action == 'setup-all'
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          workingDirectory: ./workers
-          command: deploy
+        working-directory: ./workers
+        run: |
+          echo "Deployando Worker..."
+          wrangler deploy
+          echo ""
+          echo "=========================================="
+          echo "Worker deployado!"
+          echo "=========================================="
 
       - name: Summary
         run: |
           echo ""
           echo "=========================================="
           echo "  Setup Completado!"
-          echo "=========================================="
-          echo ""
-          echo "Este proyecto usa el plan GRATUITO de Cloudflare:"
-          echo "  ✓ Workers: 100,000 requests/dia"
-          echo "  ✓ Pages: Ilimitado"
-          echo "  ✓ D1: 5M queries/mes"
-          echo "  ✓ KV: 1GB storage"
-          echo ""
-          echo "NOTA: Sin Durable Objects (requieren plan pago)"
-          echo "El chat y presencia usan polling HTTP + D1"
-          echo ""
-          echo "Proximos pasos:"
-          echo "  1. Verificar que el Worker este deployado"
-          echo "  2. Configurar secrets en Cloudflare Dashboard"
-          echo "  3. Actualizar VITE_API_URL en GitHub Secrets"
-          echo "  4. Hacer push para deployar el frontend"
           echo "=========================================="
