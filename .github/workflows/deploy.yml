@@ -61,5 +61,9 @@ jobs:
         env:
           VITE_API_URL: ${{ secrets.VITE_API_URL }}
 
+      - name: Create Pages Project (if not exists)
+        run: |
+          wrangler pages project create iptv-frontend --production-branch=main 2>/dev/null || echo "Project already exists or using existing"
+
       - name: Deploy to Cloudflare Pages
         run: wrangler pages deploy frontend/dist --project-name=iptv-frontend
