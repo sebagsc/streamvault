@@ -381,21 +381,40 @@ function StreamsTab() {
 }
 
 // ---- Settings Tab ----
+const SOURCE_INFO: { key: string; label: string; desc: string }[] = [
+  { key: 'freetv', label: 'Free-TV', desc: 'Curated, reliable streams' },
+  { key: 'xumo', label: 'Xumo', desc: 'US FAST channels' },
+  { key: 'roku', label: 'Roku Channel', desc: 'US FAST channels' },
+  { key: 'vizio', label: 'Vizio', desc: 'US FAST channels' },
+  { key: 'lg', label: 'LG Channels', desc: 'Multi-region FAST' },
+  { key: 'iptv-org', label: 'iptv-org', desc: 'Comprehensive, 10k+ channels' },
+];
+
 function SettingsTab() {
   const [refreshing, setRefreshing] = useState(false);
   const [lastRefresh, setLastRefresh] = useState<string | null>(null);
+  const [sources, setSources] = useState<Record<string, number>>({});
+  const [totalChannels, setTotalChannels] = useState(0);
   const [refreshMsg, setRefreshMsg] = useState('');
 
-  useEffect(() => {
-    adminApi.refreshStatus().then((d) => setLastRefresh(d.last_refresh)).catch(() => {});
-  }, []);
+  const loadStatus = () => {
+    adminApi.refreshStatus().then((d) => {
+      setLastRefresh(d.last_refresh);
+      setSources(d.sources || {});
+      setTotalChannels(d.total || 0);
+    }).catch(() => {});
+  };
+
+  useEffect(() => { loadStatus(); }, []);
 
   const handleRefresh = async () => {
     setRefreshing(true);
     setRefreshMsg('');
     try {
       await adminApi.refreshSources();
-      setRefreshMsg('Refresh started! It may take a minute to complete. Check back shortly.');
+      setRefreshMsg('Refresh started in background. Reload in ~30s to see updated counts.');
+      // Auto-reload status after 35s
+      setTimeout(loadStatus, 35000);
     } catch (e: any) {
       setRefreshMsg(`Error: ${e.message || 'Failed to refresh'}`);
     } finally {
@@ -406,32 +425,55 @@ function SettingsTab() {
   return (
     <div className="space-y-6">
       <div className="card p-5">
-        <h3 className="text-sm font-semibold text-text-secondary uppercase tracking-wider mb-4">Channel Sources</h3>
-        <p className="text-text-secondary text-sm mb-4">
-          Channels are fetched from Free-TV (curated) and iptv-org (comprehensive). Data refreshes automatically every 6 hours via cron. You can also trigger a manual refresh.
-        </p>
-        {lastRefresh && (
-          <p className="text-text-muted text-xs mb-4">
-            Last refresh: {new Date(lastRefresh).toLocaleString()}
-          </p>
-        )}
-        <button
-          onClick={handleRefresh}
-          disabled={refreshing}
-          className="btn-primary disabled:opacity-50"
-        >
-          {refreshing ? (
-            <span className="flex items-center gap-2">
-              <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-              </svg>
-              Refreshing sources...
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-sm font-semibold text-text-secondary uppercase tracking-wider">Channel Sources</h3>
+          {lastRefresh && (
+            <span className="text-text-muted text-xs">
+              Last refresh: {new Date(lastRefresh).toLocaleString()}
             </span>
-          ) : (
-            'Refresh sources now'
           )}
-        </button>
+        </div>
+
+        <div className="space-y-2 mb-5">
+          {SOURCE_INFO.map((src) => {
+            const count = sources[src.key] || 0;
+            return (
+              <div key={src.key} className="flex items-center justify-between py-2 px-3 bg-surface rounded-lg">
+                <div className="flex items-center gap-3">
+                  <span className={`w-2 h-2 rounded-full ${count > 0 ? 'bg-status-online' : 'bg-status-broken'}`} />
+                  <div>
+                    <p className="text-text-primary text-sm font-medium">{src.label}</p>
+                    <p className="text-text-muted text-xs">{src.desc}</p>
+                  </div>
+                </div>
+                <span className="text-text-secondary text-sm font-mono">
+                  {count > 0 ? `${count.toLocaleString()} ch` : 'No data'}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="flex items-center justify-between pt-3 border-t border-surface-border">
+          <p className="text-text-primary text-sm font-medium">{totalChannels.toLocaleString()} total channels</p>
+          <button
+            onClick={handleRefresh}
+            disabled={refreshing}
+            className="btn-primary disabled:opacity-50"
+          >
+            {refreshing ? (
+              <span className="flex items-center gap-2">
+                <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+                Refreshing...
+              </span>
+            ) : (
+              'Refresh all sources'
+            )}
+          </button>
+        </div>
         {refreshMsg && (
           <p className={`mt-3 text-sm ${refreshMsg.startsWith('Error') ? 'text-status-broken' : 'text-status-online'}`}>
             {refreshMsg}

@@ -213,7 +213,7 @@ export const meta = {
 // Admin
 export const admin = {
   refreshSources: () => request<{ ok: boolean; last_refresh: string }>('/admin/refresh-sources', { method: 'POST' }),
-  refreshStatus: () => request<{ last_refresh: string | null }>('/admin/refresh-status'),
+  refreshStatus: () => request<{ last_refresh: string | null; sources: Record<string, number>; total: number }>('/admin/refresh-status'),
 };
 
 // Types

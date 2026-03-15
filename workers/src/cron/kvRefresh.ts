@@ -232,22 +232,29 @@ export async function runKvRefresh(kv: KVNamespace): Promise<void> {
   console.log('[KV Refresh] Starting full data refresh...');
   const TTL = 7 * 3600; // 7 hours (slightly > 6h cron interval)
 
-  // Fetch all data sources in parallel
+  // Fetch data in two batches to stay within Workers subrequest limits
   const ua = { headers: { 'User-Agent': 'StreamVault/1.0' } };
-  const [freeTvRes, xumoRes, rokuRes, vizioRes, lgRes, m3uRes, channelsRes, feedsRes, categoriesRes, countriesRes, languagesRes, blocklistRes, guidesRes] =
+
+  // Batch 1: M3U playlists + essential metadata
+  const [freeTvRes, m3uRes, channelsRes, feedsRes, blocklistRes] =
     await Promise.all([
       fetch(FREETV_M3U, ua),
+      fetch(IPTV_M3U, ua),
+      fetch(`${IPTV_API}/channels.json`, ua),
+      fetch(`${IPTV_API}/feeds.json`, ua),
+      fetch(`${IPTV_API}/blocklist.json`, ua),
+    ]);
+
+  // Batch 2: Additional M3U sources + filter metadata
+  const [xumoRes, rokuRes, vizioRes, lgRes, categoriesRes, countriesRes, languagesRes, guidesRes] =
+    await Promise.all([
       fetch(XUMO_M3U, ua),
       fetch(ROKU_M3U, ua),
       fetch(VIZIO_M3U, ua),
       fetch(LG_M3U, ua),
-      fetch(IPTV_M3U, ua),
-      fetch(`${IPTV_API}/channels.json`, ua),
-      fetch(`${IPTV_API}/feeds.json`, ua),
       fetch(`${IPTV_API}/categories.json`, ua),
       fetch(`${IPTV_API}/countries.json`, ua),
       fetch(`${IPTV_API}/languages.json`, ua),
-      fetch(`${IPTV_API}/blocklist.json`, ua),
       fetch(`${IPTV_API}/guides.json`, ua),
     ]);
 

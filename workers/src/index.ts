@@ -106,10 +106,19 @@ app.post('/api/admin/refresh-sources', requireAdmin(), async (c) => {
   return c.json({ ok: true, message: 'Refresh started in background' });
 });
 
-// Admin: get last refresh timestamp
+// Admin: get refresh status with source breakdown
 app.get('/api/admin/refresh-status', requireAdmin(), async (c) => {
   const lastRefresh = await c.env.KV.get('last_refresh');
-  return c.json({ last_refresh: lastRefresh });
+  // Count channels per source from KV cache
+  const channelsRaw = await c.env.KV.get('channels');
+  const sourceCounts: Record<string, number> = {};
+  if (channelsRaw) {
+    const channels: { source: string }[] = JSON.parse(channelsRaw);
+    for (const ch of channels) {
+      sourceCounts[ch.source] = (sourceCounts[ch.source] || 0) + 1;
+    }
+  }
+  return c.json({ last_refresh: lastRefresh, sources: sourceCounts, total: Object.values(sourceCounts).reduce((a, b) => a + b, 0) });
 });
 
 // 404 fallback
