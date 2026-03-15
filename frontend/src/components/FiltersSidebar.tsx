@@ -16,6 +16,7 @@ export default function FiltersSidebar({ isOpen, onClose }: Props) {
   const [categories, setCategories] = useState<{ id: string; name: string; count?: number }[]>([]);
   const [langSearch, setLangSearch] = useState('');
   const [countrySearch, setCountrySearch] = useState('');
+  const [showAllCats, setShowAllCats] = useState(false);
 
   useEffect(() => {
     Promise.all([meta.countries(), meta.languages(), meta.categories()])
@@ -122,7 +123,7 @@ export default function FiltersSidebar({ isOpen, onClose }: Props) {
             >
               All
             </button>
-            {categories.map((cat) => (
+            {(showAllCats ? categories : categories.slice(0, 10)).map((cat) => (
               <button
                 key={cat.id}
                 onClick={() => setFilter('category', filters.category === cat.id ? '' : cat.id)}
@@ -132,9 +133,17 @@ export default function FiltersSidebar({ isOpen, onClose }: Props) {
                     : 'bg-surface hover:bg-surface-hover text-text-secondary'
                 }`}
               >
-                {cat.name}
+                {cat.name}{cat.count ? ` (${cat.count})` : ''}
               </button>
             ))}
+            {categories.length > 10 && (
+              <button
+                onClick={() => setShowAllCats((v) => !v)}
+                className="px-2.5 py-1 rounded-lg text-xs text-accent hover:underline"
+              >
+                {showAllCats ? 'Show less' : `+${categories.length - 10} more`}
+              </button>
+            )}
           </div>
         </FilterSection>
 

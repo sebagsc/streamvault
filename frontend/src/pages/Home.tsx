@@ -106,7 +106,6 @@ export default function Home() {
                     { value: 'roku', label: 'Roku' },
                     { value: 'vizio', label: 'Vizio' },
                     { value: 'lg', label: 'LG' },
-                    { value: 'pluto', label: 'Pluto' },
                     { value: 'iptv-org', label: 'iptv-org' },
                   ] as const).map((s) => (
                     <button

@@ -387,7 +387,6 @@ const SOURCE_INFO: { key: string; label: string; desc: string }[] = [
   { key: 'roku', label: 'Roku Channel', desc: 'US FAST channels' },
   { key: 'vizio', label: 'Vizio', desc: 'US FAST channels' },
   { key: 'lg', label: 'LG Channels', desc: 'Multi-region FAST' },
-  { key: 'pluto', label: 'Pluto TV', desc: 'Free ad-supported streaming' },
   { key: 'iptv-org', label: 'iptv-org', desc: 'Comprehensive, 10k+ channels' },
 ];
 
