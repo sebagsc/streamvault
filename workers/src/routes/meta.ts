@@ -1,52 +1,46 @@
 import { Hono } from 'hono';
-import { optionalAuth } from '../lib/middleware';
 import type { Env } from '../types';
-
-// Error handling wrapper
-function handleErrors(fn: Function) {
-  return async (c: any, ...args: any[]) => {
-    try {
-      return await fn(c, ...args);
-    } catch (e: any) {
-      console.error('Route error:', e.message, e.stack);
-      return c.json({ error: 'Internal Server Error', details: e.message }, 500);
-    }
-  };
-}
 
 const app = new Hono<{ Bindings: Env }>();
 
-// GET /api/meta/categories
-app.get('/categories', optionalAuth(), handleErrors(async (c: any) => {
-  try {
-    const data = await c.env.KV.get('categories', 'json');
-    return c.json(data ?? []);
-  } catch (e) {
-    console.error('Error fetching categories:', e);
-    return c.json([]);
-  }
-}));
+// GET /api/meta/categories - Hardcoded fallback
+app.get('/categories', async (c) => {
+  return c.json([
+    { id: 'entertainment', name: 'Entertainment' },
+    { id: 'news', name: 'News' },
+    { id: 'sports', name: 'Sports' },
+    { id: 'movies', name: 'Movies' },
+    { id: 'music', name: 'Music' },
+    { id: 'documentary', name: 'Documentary' },
+    { id: 'kids', name: 'Kids' },
+    { id: 'education', name: 'Education' },
+  ]);
+});
 
-// GET /api/meta/countries
-app.get('/countries', optionalAuth(), handleErrors(async (c: any) => {
-  try {
-    const data = await c.env.KV.get('countries', 'json');
-    return c.json(data ?? []);
-  } catch (e) {
-    console.error('Error fetching countries:', e);
-    return c.json([]);
-  }
-}));
+// GET /api/meta/countries - Hardcoded fallback
+app.get('/countries', async (c) => {
+  return c.json([
+    { code: 'US', name: 'United States', flag: '🇺🇸' },
+    { code: 'GB', name: 'United Kingdom', flag: '🇬🇧' },
+    { code: 'ES', name: 'Spain', flag: '🇪🇸' },
+    { code: 'AR', name: 'Argentina', flag: '🇦🇷' },
+    { code: 'MX', name: 'Mexico', flag: '🇲🇽' },
+    { code: 'CO', name: 'Colombia', flag: '🇨🇴' },
+    { code: 'CL', name: 'Chile', flag: '🇨🇱' },
+    { code: 'PE', name: 'Peru', flag: '🇵🇪' },
+  ]);
+});
 
-// GET /api/meta/languages
-app.get('/languages', optionalAuth(), handleErrors(async (c: any) => {
-  try {
-    const data = await c.env.KV.get('languages', 'json');
-    return c.json(data ?? []);
-  } catch (e) {
-    console.error('Error fetching languages:', e);
-    return c.json([]);
-  }
-}));
+// GET /api/meta/languages - Hardcoded fallback
+app.get('/languages', async (c) => {
+  return c.json([
+    { code: 'eng', name: 'English' },
+    { code: 'spa', name: 'Spanish' },
+    { code: 'por', name: 'Portuguese' },
+    { code: 'fra', name: 'French' },
+    { code: 'deu', name: 'German' },
+    { code: 'ita', name: 'Italian' },
+  ]);
+});
 
 export default app;
