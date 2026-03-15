@@ -76,7 +76,7 @@ app.post('/login', async (c) => {
       status: 200,
       headers: {
         'Content-Type': 'application/json',
-        'Set-Cookie': `session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=604800`,
+        'Set-Cookie': `session=${token}; HttpOnly; SameSite=None; Secure; Path=/; Max-Age=604800`,
       },
     }
   );
@@ -87,7 +87,7 @@ app.post('/logout', (c) => {
   return new Response(JSON.stringify({ ok: true }), {
     headers: {
       'Content-Type': 'application/json',
-      'Set-Cookie': 'session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0',
+      'Set-Cookie': 'session=; HttpOnly; SameSite=None; Secure; Path=/; Max-Age=0',
     },
   });
 });
