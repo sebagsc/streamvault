@@ -20,6 +20,18 @@ app.post('/generate', requireAdmin(), async (c) => {
   return c.json({ token, url });
 });
 
+// GET /api/invite/list — admin only (MUST be before /:token to avoid being caught by it)
+app.get('/list', requireAdmin(), async (c) => {
+  const invites = await c.env.DB.prepare(
+    `SELECT i.*, u.email as used_by_email
+     FROM invite_links i
+     LEFT JOIN users u ON i.used_by = u.id
+     ORDER BY i.created_at DESC`
+  ).all<InviteLink & { used_by_email: string | null }>();
+
+  return c.json(invites.results);
+});
+
 // GET /api/invite/:token — public, validate token
 app.get('/:token', async (c) => {
   const { token } = c.req.param();
@@ -109,18 +121,6 @@ app.post('/confirm-totp', async (c) => {
     .run();
 
   return c.json({ ok: true });
-});
-
-// GET /api/invite/list — admin only
-app.get('/list', requireAdmin(), async (c) => {
-  const invites = await c.env.DB.prepare(
-    `SELECT i.*, u.email as used_by_email
-     FROM invite_links i
-     LEFT JOIN users u ON i.used_by = u.id
-     ORDER BY i.created_at DESC`
-  ).all<InviteLink & { used_by_email: string | null }>();
-
-  return c.json(invites.results);
 });
 
 // DELETE /api/invite/:token — admin only

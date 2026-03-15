@@ -179,9 +179,9 @@ function EventsTab() {
   const [channelSearch, setChannelSearch] = useState('');
 
   const load = async () => {
-    const [e, c] = await Promise.all([eventsApi.list(), channelsApi.list({ show_all: true })]);
+    const [e, cRes] = await Promise.all([eventsApi.list(), channelsApi.list({ show_all: true, limit: 500 })]);
     setEvents(e);
-    setChannels(c);
+    setChannels(cRes.channels);
   };
 
   useEffect(() => { load(); }, []);

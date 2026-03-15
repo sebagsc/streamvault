@@ -1,44 +1,251 @@
-const IPTV_BASE = 'https://iptv-org.github.io/api';
+// ============================================
+// KV Refresh — Cron Job (every 6 hours)
+//
+// Fetches ALL iptv-org data and stores in KV:
+// 1. M3U playlist (index.m3u) → parsed into structured channel+stream data
+// 2. channels.json → rich metadata to enrich M3U entries
+// 3. categories.json, countries.json, languages.json → filter options
+// 4. blocklist.json → channels to hide
+// 5. guides.json → EPG references
+// ============================================
 
-const ENDPOINTS = [
-  { key: 'channels', url: `${IPTV_BASE}/channels.json` },
-  { key: 'streams', url: `${IPTV_BASE}/streams.json` },
-  { key: 'categories', url: `${IPTV_BASE}/categories.json` },
-  { key: 'countries', url: `${IPTV_BASE}/countries.json` },
-  { key: 'languages', url: `${IPTV_BASE}/languages.json` },
-  { key: 'guides', url: `${IPTV_BASE}/guides.json` },
-  { key: 'blocklist', url: `${IPTV_BASE}/blocklist.json` },
-];
+const IPTV_API = 'https://iptv-org.github.io/api';
+const IPTV_M3U = 'https://iptv-org.github.io/iptv/index.m3u';
 
-export async function runKvRefresh(kv: KVNamespace): Promise<void> {
-  console.log('[KV Refresh] Starting iptv-org data refresh...');
+// ---------- M3U Parser ----------
 
-  const results = await Promise.allSettled(
-    ENDPOINTS.map(async ({ key, url }) => {
-      const resp = await fetch(url, {
-        headers: { 'User-Agent': 'IPTV-App/1.0 (private-instance)' },
-      });
-      if (!resp.ok) throw new Error(`HTTP ${resp.status} fetching ${url}`);
-      const data = await resp.json();
+interface M3UEntry {
+  tvgId: string;
+  tvgLogo: string;
+  groupTitle: string;
+  name: string;
+  url: string;
+  tvgLanguage: string;
+  tvgCountry: string;
+  userAgent: string;
+  referrer: string;
+}
 
-      // For blocklist, store just the channel IDs
-      if (key === 'blocklist') {
-        const ids = (data as Array<{ channel: string }>).map((b) => b.channel);
-        await kv.put(key, JSON.stringify(ids), { expirationTtl: 7 * 3600 });
-      } else {
-        await kv.put(key, JSON.stringify(data), { expirationTtl: 7 * 3600 });
+function parseM3U(text: string): M3UEntry[] {
+  const lines = text.split('\n');
+  const entries: M3UEntry[] = [];
+  let current: Partial<M3UEntry> | null = null;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+
+    if (line.startsWith('#EXTINF:')) {
+      current = {};
+
+      // Parse attributes from #EXTINF line
+      const tvgId = line.match(/tvg-id="([^"]*)"/)?.[1] ?? '';
+      const tvgLogo = line.match(/tvg-logo="([^"]*)"/)?.[1] ?? '';
+      const groupTitle = line.match(/group-title="([^"]*)"/)?.[1] ?? '';
+      const tvgLanguage = line.match(/tvg-language="([^"]*)"/)?.[1] ?? '';
+      const tvgCountry = line.match(/tvg-country="([^"]*)"/)?.[1] ?? '';
+      const userAgent = line.match(/user-agent="([^"]*)"/)?.[1] ?? '';
+      const referrer = line.match(/http-referrer="([^"]*)"/)?.[1] ?? '';
+
+      // Channel name is after the last comma
+      const lastComma = line.lastIndexOf(',');
+      const name = lastComma !== -1 ? line.substring(lastComma + 1).trim() : '';
+
+      current = { tvgId, tvgLogo, groupTitle, name, tvgLanguage, tvgCountry, userAgent, referrer };
+    } else if (line.startsWith('#EXTVLCOPT:')) {
+      // VLC options like http-referrer, http-user-agent
+      if (current) {
+        const refMatch = line.match(/http-referrer=(.*)/);
+        if (refMatch) current.referrer = refMatch[1];
+        const uaMatch = line.match(/http-user-agent=(.*)/);
+        if (uaMatch) current.userAgent = uaMatch[1];
       }
-
-      console.log(`[KV Refresh] ${key}: OK (${JSON.stringify(data).length} bytes)`);
-    })
-  );
-
-  for (let i = 0; i < results.length; i++) {
-    const r = results[i];
-    if (r.status === 'rejected') {
-      console.error(`[KV Refresh] ${ENDPOINTS[i].key}: FAILED —`, r.reason);
+    } else if (line && !line.startsWith('#') && current) {
+      // This is the stream URL
+      entries.push({
+        tvgId: current.tvgId ?? '',
+        tvgLogo: current.tvgLogo ?? '',
+        groupTitle: current.groupTitle ?? '',
+        name: current.name ?? '',
+        url: line,
+        tvgLanguage: current.tvgLanguage ?? '',
+        tvgCountry: current.tvgCountry ?? '',
+        userAgent: current.userAgent ?? '',
+        referrer: current.referrer ?? '',
+      });
+      current = null;
     }
   }
 
-  console.log('[KV Refresh] Done.');
+  return entries;
+}
+
+// ---------- Types ----------
+
+export interface ParsedChannel {
+  id: string;
+  name: string;
+  logo: string;
+  country: string;
+  languages: string[];
+  categories: string[];
+  is_nsfw: boolean;
+  streams: ParsedStream[];
+}
+
+export interface ParsedStream {
+  url: string;
+  quality: string;
+  http_referrer: string;
+  user_agent: string;
+}
+
+interface IptvOrgChannel {
+  id: string;
+  name: string;
+  logo: string;
+  country: string;
+  languages: string[];
+  categories: string[];
+  is_nsfw: boolean;
+  [key: string]: unknown;
+}
+
+// ---------- Channel building ----------
+
+function buildChannels(
+  m3uEntries: M3UEntry[],
+  channelMetadata: Map<string, IptvOrgChannel>,
+  blocklist: Set<string>
+): ParsedChannel[] {
+  // Group M3U entries by channel (tvg-id or name as fallback)
+  const channelMap = new Map<string, { info: M3UEntry; streams: ParsedStream[] }>();
+
+  for (const entry of m3uEntries) {
+    const key = entry.tvgId || entry.name;
+    if (!key) continue;
+
+    // Skip blocked channels
+    if (blocklist.has(key)) continue;
+
+    if (!channelMap.has(key)) {
+      channelMap.set(key, { info: entry, streams: [] });
+    }
+
+    // Avoid duplicate stream URLs per channel
+    const existing = channelMap.get(key)!;
+    if (!existing.streams.some((s) => s.url === entry.url)) {
+      existing.streams.push({
+        url: entry.url,
+        quality: 'auto',
+        http_referrer: entry.referrer,
+        user_agent: entry.userAgent,
+      });
+    }
+  }
+
+  // Build final channel list, enriching with API metadata where available
+  const channels: ParsedChannel[] = [];
+
+  for (const [key, { info, streams }] of channelMap) {
+    const meta = channelMetadata.get(key);
+
+    channels.push({
+      id: key,
+      name: meta?.name || info.name,
+      logo: meta?.logo || info.tvgLogo,
+      country: meta?.country || info.tvgCountry.split(';')[0] || '',
+      languages: meta?.languages || (info.tvgLanguage ? info.tvgLanguage.split(';') : []),
+      categories: meta?.categories || (info.groupTitle ? [info.groupTitle] : []),
+      is_nsfw: meta?.is_nsfw ?? false,
+      streams,
+    });
+  }
+
+  // Sort alphabetically
+  channels.sort((a, b) => a.name.localeCompare(b.name));
+
+  return channels;
+}
+
+// ---------- Main refresh function ----------
+
+export async function runKvRefresh(kv: KVNamespace): Promise<void> {
+  console.log('[KV Refresh] Starting full data refresh...');
+  const TTL = 7 * 3600; // 7 hours (slightly > 6h cron interval)
+
+  // Fetch all data sources in parallel
+  const [m3uRes, channelsRes, categoriesRes, countriesRes, languagesRes, blocklistRes, guidesRes] =
+    await Promise.all([
+      fetch(IPTV_M3U, { headers: { 'User-Agent': 'StreamVault/1.0' } }),
+      fetch(`${IPTV_API}/channels.json`, { headers: { 'User-Agent': 'StreamVault/1.0' } }),
+      fetch(`${IPTV_API}/categories.json`, { headers: { 'User-Agent': 'StreamVault/1.0' } }),
+      fetch(`${IPTV_API}/countries.json`, { headers: { 'User-Agent': 'StreamVault/1.0' } }),
+      fetch(`${IPTV_API}/languages.json`, { headers: { 'User-Agent': 'StreamVault/1.0' } }),
+      fetch(`${IPTV_API}/blocklist.json`, { headers: { 'User-Agent': 'StreamVault/1.0' } }),
+      fetch(`${IPTV_API}/guides.json`, { headers: { 'User-Agent': 'StreamVault/1.0' } }),
+    ]);
+
+  // ---------- 1. Parse M3U ----------
+  if (!m3uRes.ok) {
+    console.error(`[KV Refresh] M3U fetch failed: HTTP ${m3uRes.status}`);
+    return;
+  }
+  const m3uText = await m3uRes.text();
+  const m3uEntries = parseM3U(m3uText);
+  console.log(`[KV Refresh] M3U parsed: ${m3uEntries.length} stream entries`);
+
+  // ---------- 2. Parse channels.json for metadata enrichment ----------
+  const channelMetadata = new Map<string, IptvOrgChannel>();
+  if (channelsRes.ok) {
+    const channelsData: IptvOrgChannel[] = await channelsRes.json();
+    for (const ch of channelsData) {
+      channelMetadata.set(ch.id, ch);
+    }
+    console.log(`[KV Refresh] Channel metadata: ${channelMetadata.size} entries`);
+  }
+
+  // ---------- 3. Parse blocklist ----------
+  const blocklist = new Set<string>();
+  if (blocklistRes.ok) {
+    const blocklistData: { channel: string }[] = await blocklistRes.json();
+    for (const b of blocklistData) {
+      blocklist.add(b.channel);
+    }
+    console.log(`[KV Refresh] Blocklist: ${blocklist.size} blocked channels`);
+  }
+
+  // ---------- 4. Build channels ----------
+  const channels = buildChannels(m3uEntries, channelMetadata, blocklist);
+  console.log(`[KV Refresh] Built ${channels.length} unique channels`);
+
+  // ---------- 5. Store in KV ----------
+  const channelsJson = JSON.stringify(channels);
+  console.log(`[KV Refresh] Channels data size: ${(channelsJson.length / 1024 / 1024).toFixed(2)} MB`);
+  await kv.put('channels', channelsJson, { expirationTtl: TTL });
+
+  // Store metadata for filter dropdowns
+  const storeIfOk = async (key: string, res: Response) => {
+    if (res.ok) {
+      const data = await res.json();
+      await kv.put(key, JSON.stringify(data), { expirationTtl: TTL });
+      console.log(`[KV Refresh] ${key}: OK`);
+    } else {
+      console.error(`[KV Refresh] ${key}: FAILED (HTTP ${res.status})`);
+    }
+  };
+
+  await Promise.all([
+    storeIfOk('categories', categoriesRes),
+    storeIfOk('countries', countriesRes),
+    storeIfOk('languages', languagesRes),
+    storeIfOk('guides', guidesRes),
+  ]);
+
+  // Store blocklist IDs
+  await kv.put('blocklist', JSON.stringify([...blocklist]), { expirationTtl: TTL });
+
+  // Store refresh timestamp
+  await kv.put('last_refresh', new Date().toISOString(), { expirationTtl: TTL });
+
+  console.log('[KV Refresh] Done!');
 }

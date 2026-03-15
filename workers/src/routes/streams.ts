@@ -52,8 +52,8 @@ app.delete('/custom/:id', requireAdmin(), async (c) => {
   return c.json({ ok: true });
 });
 
-// POST /api/streams/:id/report — authenticated user reports broken stream
-app.post('/:id/report', requireAuth(), async (c) => {
+// POST /api/streams/report — authenticated user reports broken stream
+app.post('/report', requireAuth(), async (c) => {
   const user = c.get('user');
   const { stream_url, channel_id } = await c.req.json<{
     stream_url: string;

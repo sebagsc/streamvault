@@ -13,6 +13,9 @@ interface ChannelFilters {
 
 interface ChannelState {
   channels: Channel[];
+  total: number;
+  page: number;
+  pages: number;
   loading: boolean;
   error: string | null;
   filters: ChannelFilters;
@@ -22,12 +25,15 @@ interface ChannelState {
   setFilter: (key: keyof ChannelFilters, value: string | boolean) => void;
   setFilters: (filters: Partial<ChannelFilters>) => void;
   setView: (view: 'grid' | 'guide') => void;
-  fetchChannels: () => Promise<void>;
+  fetchChannels: (page?: number) => Promise<void>;
   setActiveEvents: (map: Record<string, boolean>) => void;
 }
 
 export const useChannelStore = create<ChannelState>((set, get) => ({
   channels: [],
+  total: 0,
+  page: 1,
+  pages: 0,
   loading: false,
   error: null,
   filters: {
@@ -51,11 +57,11 @@ export const useChannelStore = create<ChannelState>((set, get) => ({
 
   setView: (view) => set({ view }),
 
-  fetchChannels: async () => {
+  fetchChannels: async (page = 1) => {
     const { filters } = get();
     set({ loading: true, error: null });
     try {
-      const params: ChannelQueryParams = {};
+      const params: ChannelQueryParams & { page?: number; limit?: number } = { page, limit: 100 };
       if (filters.country) params.country = filters.country;
       if (filters.language) params.language = filters.language;
       if (filters.category) params.category = filters.category;
@@ -64,7 +70,12 @@ export const useChannelStore = create<ChannelState>((set, get) => ({
       if (filters.show_all) params.show_all = true;
 
       const data = await channelsApi.list(params);
-      set({ channels: data });
+      set({
+        channels: data.channels,
+        total: data.total,
+        page: data.page,
+        pages: data.pages,
+      });
     } catch (e: unknown) {
       set({ error: e instanceof Error ? e.message : 'Failed to load channels' });
     } finally {

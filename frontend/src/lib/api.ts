@@ -96,8 +96,16 @@ export const users = {
 };
 
 // Channels
+export interface ChannelListResponse {
+  channels: Channel[];
+  total: number;
+  page: number;
+  pages: number;
+  message?: string;
+}
+
 export const channels = {
-  list: (params?: ChannelQueryParams) => {
+  list: (params?: ChannelQueryParams & { page?: number; limit?: number }) => {
     const qs = new URLSearchParams();
     if (params?.country) qs.set('country', params.country);
     if (params?.language) qs.set('language', params.language);
@@ -105,7 +113,9 @@ export const channels = {
     if (params?.nsfw) qs.set('nsfw', 'true');
     if (params?.search) qs.set('search', params.search);
     if (params?.show_all) qs.set('show_all', 'true');
-    return request<Channel[]>(`/channels?${qs}`);
+    if (params?.page) qs.set('page', String(params.page));
+    if (params?.limit) qs.set('limit', String(params.limit));
+    return request<ChannelListResponse>(`/channels?${qs}`);
   },
 
   streams: (id: string) => request<ChannelStream[]>(`/channels/${id}/streams`),
@@ -113,7 +123,7 @@ export const channels = {
   epg: (id: string) => request<{ programs: EpgProgram[] }>(`/channels/${id}/epg`),
 
   markWatched: (id: string) =>
-    request(`/channels/${id}/recently-watched`, { method: 'POST' }),
+    request(`/channels/${id}/watched`, { method: 'POST' }),
 
   recentlyWatched: () =>
     request<{ channel_id: string; watched_at: string }[]>('/channels/recently-watched'),

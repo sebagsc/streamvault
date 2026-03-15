@@ -1,101 +1,186 @@
 import { Hono } from 'hono';
-import { optionalAuth } from '../lib/middleware';
-import type { Env } from '../types';
+import { optionalAuth, requireAuth } from '../lib/middleware';
+import type { Env, CustomStream } from '../types';
+import type { ParsedChannel } from '../cron/kvRefresh';
 
 const app = new Hono<{ Bindings: Env }>();
 
-const IPTV_ORG_API = 'https://iptv-org.github.io/api';
-
-// GET /api/channels - Fetch from iptv-org API
+// GET /api/channels — returns channels from KV cache + custom streams from D1
 app.get('/', optionalAuth(), async (c) => {
   try {
-    console.log('Fetching channels from iptv-org...');
-    
-    // Fetch from iptv-org
-    const channelsRes = await fetch(`${IPTV_ORG_API}/channels.json`);
-    const streamsRes = await fetch(`${IPTV_ORG_API}/streams.json`);
-    
-    console.log('Channels status:', channelsRes.status);
-    console.log('Streams status:', streamsRes.status);
-    
-    if (!channelsRes.ok || !streamsRes.ok) {
-      throw new Error(`HTTP error: ${channelsRes.status}, ${streamsRes.status}`);
-    }
-    
-    const channels = await channelsRes.json();
-    const streams = await streamsRes.json();
-    
-    console.log('Total channels:', channels.length);
-    console.log('Total streams:', streams.length);
+    // Query params
+    const country = c.req.query('country');
+    const language = c.req.query('language');
+    const category = c.req.query('category');
+    const nsfw = c.req.query('nsfw');
+    const search = c.req.query('search');
+    const page = parseInt(c.req.query('page') || '1', 10);
+    const limit = Math.min(parseInt(c.req.query('limit') || '100', 10), 500);
 
-    // Build stream map
-    const streamMap = new Map();
-    for (const s of streams) {
-      if (!streamMap.has(s.channel)) streamMap.set(s.channel, []);
-      streamMap.get(s.channel).push(s);
+    // Load channels from KV
+    const channelsRaw = await c.env.KV.get('channels');
+    if (!channelsRaw) {
+      return c.json({ channels: [], total: 0, page, message: 'Cache empty — try again after cron runs' });
     }
-    
-    console.log('Channels with streams:', streamMap.size);
 
-    // Map channels with their streams
-    const result = channels
-      .filter(ch => streamMap.has(ch.id))
-      .slice(0, 50)
-      .map(ch => ({
-        id: ch.id,
-        name: ch.name,
-        logo: ch.logo || '',
-        country: ch.country || '',
-        languages: ch.languages || [],
-        categories: ch.categories || [],
-        is_nsfw: ch.is_nsfw || false,
-        streams: (streamMap.get(ch.id) || []).map(s => ({
-          url: s.url,
-          quality: s.height ? `${s.height}p` : 'unknown',
-          http_referrer: s.http_referrer || '',
-          user_agent: s.user_agent || '',
-          is_broken: false
-        })),
-        is_custom: false
-      }));
-    
-    console.log('Returning channels:', result.length);
-    return c.json(result);
-    
-  } catch (e) {
-    console.error('Error fetching channels:', e);
+    let channels: ParsedChannel[] = JSON.parse(channelsRaw);
+
+    // --- Filter: NSFW ---
+    if (nsfw !== 'true') {
+      channels = channels.filter((ch) => !ch.is_nsfw);
+    }
+
+    // --- Filter: Country ---
+    if (country) {
+      const countries = country.split(',').map((v) => v.trim().toUpperCase());
+      channels = channels.filter((ch) => countries.includes(ch.country.toUpperCase()));
+    }
+
+    // --- Filter: Language ---
+    if (language) {
+      const langs = language.split(',').map((v) => v.trim().toLowerCase());
+      channels = channels.filter((ch) =>
+        ch.languages.some((l) => langs.includes(l.toLowerCase()))
+      );
+    }
+
+    // --- Filter: Category ---
+    if (category) {
+      const cats = category.split(',').map((v) => v.trim().toLowerCase());
+      channels = channels.filter((ch) =>
+        ch.categories.some((ct) => cats.includes(ct.toLowerCase()))
+      );
+    }
+
+    // --- Filter: Search ---
+    if (search) {
+      const q = search.toLowerCase();
+      channels = channels.filter(
+        (ch) =>
+          ch.name.toLowerCase().includes(q) ||
+          ch.id.toLowerCase().includes(q) ||
+          ch.country.toLowerCase().includes(q) ||
+          ch.categories.some((ct) => ct.toLowerCase().includes(q))
+      );
+    }
+
+    // --- Merge custom streams from D1 ---
+    try {
+      const customStreams = await c.env.DB.prepare(
+        'SELECT * FROM custom_streams WHERE active = 1'
+      ).all<CustomStream>();
+
+      if (customStreams.results.length > 0) {
+        for (const cs of customStreams.results) {
+          if (cs.channel_id) {
+            // Append stream to existing channel
+            const existing = channels.find((ch) => ch.id === cs.channel_id);
+            if (existing) {
+              existing.streams.push({
+                url: cs.url,
+                quality: cs.quality || 'custom',
+                http_referrer: '',
+                user_agent: '',
+              });
+            }
+          } else {
+            // Fully custom channel
+            const shouldInclude =
+              (!country || (cs.country && country.toUpperCase().split(',').includes(cs.country.toUpperCase()))) &&
+              (!category || (cs.category && category.toLowerCase().split(',').includes(cs.category.toLowerCase()))) &&
+              (!search || cs.title.toLowerCase().includes(search.toLowerCase()));
+
+            if (shouldInclude && (nsfw === 'true' || !cs.is_nsfw)) {
+              channels.push({
+                id: `custom_${cs.id}`,
+                name: cs.title,
+                logo: '',
+                country: cs.country || '',
+                languages: cs.language ? [cs.language] : [],
+                categories: cs.category ? [cs.category] : [],
+                is_nsfw: !!cs.is_nsfw,
+                streams: [{ url: cs.url, quality: cs.quality || 'custom', http_referrer: '', user_agent: '' }],
+              });
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.error('Error fetching custom streams:', e);
+    }
+
+    // Pagination
+    const total = channels.length;
+    const offset = (page - 1) * limit;
+    const paginated = channels.slice(offset, offset + limit);
+
+    return c.json({
+      channels: paginated.map((ch) => ({
+        ...ch,
+        is_custom: ch.id.startsWith('custom_'),
+      })),
+      total,
+      page,
+      pages: Math.ceil(total / limit),
+    });
+  } catch (e: any) {
+    console.error('Error in /api/channels:', e);
     return c.json({ error: 'Failed to fetch channels', details: e.message }, 500);
   }
 });
 
-// GET /api/channels/:id/streams
+// GET /api/channels/:id/streams — get streams for a specific channel
 app.get('/:id/streams', optionalAuth(), async (c) => {
-  try {
-    const { id } = c.req.param();
-    
-    const streamsRes = await fetch(`${IPTV_ORG_API}/streams.json`);
-    const streams = await streamsRes.json();
-    
-    const channelStreams = streams
-      .filter(s => s.channel === id)
-      .map(s => ({
-        url: s.url,
-        quality: s.height ? `${s.height}p` : 'unknown',
-        http_referrer: s.http_referrer || '',
-        user_agent: s.user_agent || '',
-        is_broken: false
-      }));
+  const { id } = c.req.param();
 
-    return c.json(channelStreams);
+  try {
+    const channelsRaw = await c.env.KV.get('channels');
+    if (!channelsRaw) return c.json([]);
+
+    const channels: ParsedChannel[] = JSON.parse(channelsRaw);
+    const channel = channels.find((ch) => ch.id === id);
+
+    if (!channel) return c.json([]);
+
+    // Also append any custom streams for this channel
+    const customStreams = await c.env.DB.prepare(
+      'SELECT * FROM custom_streams WHERE channel_id = ? AND active = 1'
+    ).all<CustomStream>();
+
+    const allStreams = [
+      ...channel.streams,
+      ...customStreams.results.map((cs) => ({
+        url: cs.url,
+        quality: cs.quality || 'custom',
+        http_referrer: '',
+        user_agent: '',
+      })),
+    ];
+
+    return c.json(allStreams);
   } catch (e) {
-    console.error('Error:', e);
+    console.error('Error fetching streams:', e);
     return c.json([]);
   }
 });
 
-// GET /api/channels/:id/epg
+// GET /api/channels/:id/epg — placeholder for EPG data
 app.get('/:id/epg', optionalAuth(), async (c) => {
   return c.json({ programs: [] });
+});
+
+// POST /api/channels/:id/watched — mark a channel as recently watched
+app.post('/:id/watched', requireAuth(), async (c) => {
+  const user = c.get('user');
+  const { id } = c.req.param();
+
+  await c.env.DB.prepare(
+    `INSERT OR REPLACE INTO recently_watched (user_id, channel_id, watched_at) VALUES (?, ?, datetime('now'))`
+  )
+    .bind(user.sub, id)
+    .run();
+
+  return c.json({ ok: true });
 });
 
 export default app;

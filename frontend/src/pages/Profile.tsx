@@ -29,13 +29,13 @@ export default function Profile() {
       meta.languages(),
       meta.categories(),
       channelsApi.recentlyWatched(),
-      channelsApi.list({ show_all: true }),
-    ]).then(([c, l, cat, recent, ch]) => {
+      channelsApi.list({ show_all: true, limit: 500 }),
+    ]).then(([c, l, cat, recent, chRes]) => {
       setCountries(c);
       setLanguages(l);
       setCategories(cat);
       setRecentChannels(recent);
-      setAllChannels(ch);
+      setAllChannels(chRes.channels);
     }).catch(() => {});
   }, []);
 
