@@ -283,22 +283,58 @@ export async function runKvRefresh(kv: KVNamespace): Promise<void> {
   console.log(`[KV Refresh] Channels data size: ${(channelsJson.length / 1024 / 1024).toFixed(2)} MB`);
   await kv.put('channels', channelsJson, { expirationTtl: TTL });
 
-  // Store metadata for filter dropdowns
-  const storeIfOk = async (key: string, res: Response) => {
-    if (res.ok) {
-      const data = await res.json();
-      await kv.put(key, JSON.stringify(data), { expirationTtl: TTL });
-      console.log(`[KV Refresh] ${key}: OK`);
-    } else {
-      console.error(`[KV Refresh] ${key}: FAILED (HTTP ${res.status})`);
+  // Build filtered metadata lists from actual channel data (only items with channels)
+  // Parse full reference lists for name lookups
+  const allLanguages: { code: string; name: string }[] = languagesRes.ok ? await languagesRes.json() : [];
+  const allCountries: { code: string; name: string; flag: string }[] = countriesRes.ok ? await countriesRes.json() : [];
+  const allCategories: { id: string; name: string }[] = categoriesRes.ok ? await categoriesRes.json() : [];
+
+  const langNameMap = new Map(allLanguages.map((l) => [l.code, l.name]));
+  const countryNameMap = new Map(allCountries.map((c) => [c.code, { name: c.name, flag: c.flag }]));
+  const catNameMap = new Map(allCategories.map((c) => [c.id, c.name]));
+
+  // Count channels per language, country, and category
+  const langCount = new Map<string, number>();
+  const countryCount = new Map<string, number>();
+  const catCount = new Map<string, number>();
+
+  for (const ch of channels) {
+    for (const lang of ch.languages) {
+      langCount.set(lang, (langCount.get(lang) || 0) + 1);
     }
-  };
+    if (ch.country) {
+      countryCount.set(ch.country, (countryCount.get(ch.country) || 0) + 1);
+    }
+    for (const cat of ch.categories) {
+      catCount.set(cat, (catCount.get(cat) || 0) + 1);
+    }
+  }
+
+  // Build sorted lists (most channels first)
+  const filteredLanguages = [...langCount.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([code, count]) => ({ code, name: langNameMap.get(code) || code, count }));
+
+  const filteredCountries = [...countryCount.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([code, count]) => {
+      const info = countryNameMap.get(code);
+      return { code, name: info?.name || code, flag: info?.flag || '', count };
+    });
+
+  const filteredCategories = [...catCount.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([id, count]) => ({ id, name: catNameMap.get(id) || id, count }));
+
+  console.log(`[KV Refresh] Filters: ${filteredLanguages.length} languages, ${filteredCountries.length} countries, ${filteredCategories.length} categories`);
 
   await Promise.all([
-    storeIfOk('categories', categoriesRes),
-    storeIfOk('countries', countriesRes),
-    storeIfOk('languages', languagesRes),
-    storeIfOk('guides', guidesRes),
+    kv.put('languages', JSON.stringify(filteredLanguages), { expirationTtl: TTL }),
+    kv.put('countries', JSON.stringify(filteredCountries), { expirationTtl: TTL }),
+    kv.put('categories', JSON.stringify(filteredCategories), { expirationTtl: TTL }),
+    guidesRes.ok
+      ? kv.put('guides', JSON.stringify(await guidesRes.json()), { expirationTtl: TTL })
+      : Promise.resolve(),
   ]);
 
   // Store blocklist IDs

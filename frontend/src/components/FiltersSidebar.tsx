@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useChannelStore } from '../store/channelStore';
 import { useAuthStore } from '../store/authStore';
 import { meta } from '../lib/api';
@@ -11,9 +11,11 @@ interface Props {
 export default function FiltersSidebar({ isOpen, onClose }: Props) {
   const { filters, setFilter } = useChannelStore();
   const { user } = useAuthStore();
-  const [countries, setCountries] = useState<{ code: string; name: string; flag: string }[]>([]);
-  const [languages, setLanguages] = useState<{ code: string; name: string }[]>([]);
-  const [categories, setCategories] = useState<{ id: string; name: string }[]>([]);
+  const [countries, setCountries] = useState<{ code: string; name: string; flag: string; count?: number }[]>([]);
+  const [languages, setLanguages] = useState<{ code: string; name: string; count?: number }[]>([]);
+  const [categories, setCategories] = useState<{ id: string; name: string; count?: number }[]>([]);
+  const [langSearch, setLangSearch] = useState('');
+  const [countrySearch, setCountrySearch] = useState('');
 
   useEffect(() => {
     Promise.all([meta.countries(), meta.languages(), meta.categories()])
@@ -24,6 +26,18 @@ export default function FiltersSidebar({ isOpen, onClose }: Props) {
       })
       .catch(() => {});
   }, []);
+
+  const filteredLangs = useMemo(() => {
+    if (!langSearch) return languages;
+    const q = langSearch.toLowerCase();
+    return languages.filter((l) => l.name.toLowerCase().includes(q) || l.code.toLowerCase().includes(q));
+  }, [languages, langSearch]);
+
+  const filteredCountries = useMemo(() => {
+    if (!countrySearch) return countries;
+    const q = countrySearch.toLowerCase();
+    return countries.filter((c) => c.name.toLowerCase().includes(q) || c.code.toLowerCase().includes(q));
+  }, [countries, countrySearch]);
 
   const FilterSection = ({
     label,
@@ -51,30 +65,46 @@ export default function FiltersSidebar({ isOpen, onClose }: Props) {
 
       <div className="flex-1 overflow-y-auto p-4">
         <FilterSection label="Country">
+          <input
+            type="text"
+            placeholder="Search countries..."
+            value={countrySearch}
+            onChange={(e) => setCountrySearch(e.target.value)}
+            className="input text-sm mb-1.5"
+          />
           <select
             value={filters.country}
             onChange={(e) => setFilter('country', e.target.value)}
             className="input text-sm"
+            size={1}
           >
             <option value="">All countries</option>
-            {countries.map((c) => (
+            {filteredCountries.map((c) => (
               <option key={c.code} value={c.code}>
-                {c.flag} {c.name}
+                {c.flag} {c.name}{c.count ? ` (${c.count})` : ''}
               </option>
             ))}
           </select>
         </FilterSection>
 
         <FilterSection label="Language">
+          <input
+            type="text"
+            placeholder="Search languages..."
+            value={langSearch}
+            onChange={(e) => setLangSearch(e.target.value)}
+            className="input text-sm mb-1.5"
+          />
           <select
             value={filters.language}
             onChange={(e) => setFilter('language', e.target.value)}
             className="input text-sm"
+            size={1}
           >
             <option value="">All languages</option>
-            {languages.slice(0, 100).map((l) => (
+            {filteredLangs.map((l) => (
               <option key={l.code} value={l.code}>
-                {l.name}
+                {l.name}{l.count ? ` (${l.count})` : ''}
               </option>
             ))}
           </select>
