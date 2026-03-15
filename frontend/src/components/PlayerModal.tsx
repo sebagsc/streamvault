@@ -19,6 +19,11 @@ export default function PlayerModal() {
   const [presence, setPresence] = useState<{ id: string; username: string }[]>([]);
   const [reportSent, setReportSent] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(true);
+  const [volume, setVolume] = useState(1);
+  const [isMuted, setIsMuted] = useState(false);
+  const [showControls, setShowControls] = useState(true);
+  const controlsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const currentStream = channel?.streams[streamIndex];
@@ -93,12 +98,21 @@ export default function PlayerModal() {
   // Keyboard shortcuts
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') closePlayer();
-      if (e.key === 'f') toggleFullscreen();
+      // Don't capture keys when typing in chat
+      if ((e.target as HTMLElement)?.tagName === 'INPUT' || (e.target as HTMLElement)?.tagName === 'TEXTAREA') return;
+      switch (e.key) {
+        case 'Escape': closePlayer(); break;
+        case 'f': toggleFullscreen(); break;
+        case ' ': e.preventDefault(); togglePlay(); break;
+        case 'k': togglePlay(); break;
+        case 'm': toggleMute(); break;
+        case 'ArrowUp': e.preventDefault(); handleVolumeChange(volume + 0.1); break;
+        case 'ArrowDown': e.preventDefault(); handleVolumeChange(volume - 0.1); break;
+      }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, []);
+  }, [volume]);
 
   const toggleFullscreen = () => {
     if (!containerRef.current) return;
@@ -108,6 +122,65 @@ export default function PlayerModal() {
       document.exitFullscreen();
     }
   };
+
+  // Play/Pause controls
+  const togglePlay = useCallback(() => {
+    if (!videoRef.current) return;
+    if (videoRef.current.paused) {
+      videoRef.current.play().catch(() => {});
+      setIsPlaying(true);
+    } else {
+      videoRef.current.pause();
+      setIsPlaying(false);
+    }
+  }, []);
+
+  const stopPlayback = useCallback(() => {
+    if (!videoRef.current) return;
+    videoRef.current.pause();
+    videoRef.current.currentTime = 0;
+    setIsPlaying(false);
+  }, []);
+
+  // Volume controls
+  const handleVolumeChange = useCallback((newVol: number) => {
+    if (!videoRef.current) return;
+    const clamped = Math.max(0, Math.min(1, newVol));
+    videoRef.current.volume = clamped;
+    setVolume(clamped);
+    if (clamped > 0 && isMuted) {
+      videoRef.current.muted = false;
+      setIsMuted(false);
+    }
+  }, [isMuted]);
+
+  const toggleMute = useCallback(() => {
+    if (!videoRef.current) return;
+    const newMuted = !videoRef.current.muted;
+    videoRef.current.muted = newMuted;
+    setIsMuted(newMuted);
+  }, []);
+
+  // Auto-hide controls after inactivity
+  const resetControlsTimer = useCallback(() => {
+    setShowControls(true);
+    if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current);
+    controlsTimerRef.current = setTimeout(() => setShowControls(false), 3000);
+  }, []);
+
+  // Sync play state from video element events
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    const onPlay = () => setIsPlaying(true);
+    const onPause = () => setIsPlaying(false);
+    video.addEventListener('play', onPlay);
+    video.addEventListener('pause', onPause);
+    return () => {
+      video.removeEventListener('play', onPlay);
+      video.removeEventListener('pause', onPause);
+    };
+  }, [channel?.id, streamIndex]);
 
   const togglePip = async () => {
     if (!videoRef.current) return;
@@ -182,14 +255,21 @@ export default function PlayerModal() {
             </div>
           </div>
 
-          {/* Video */}
-          <video
-            ref={videoRef}
-            className="w-full h-full object-contain"
-            autoPlay
-            playsInline
-            controls={false}
-          />
+          {/* Video — click to play/pause, move to show controls */}
+          <div
+            className="relative w-full h-full cursor-pointer"
+            onClick={togglePlay}
+            onMouseMove={resetControlsTimer}
+            onMouseEnter={() => setShowControls(true)}
+          >
+            <video
+              ref={videoRef}
+              className="w-full h-full object-contain"
+              autoPlay
+              playsInline
+              controls={false}
+            />
+          </div>
 
           {/* Fallback / error overlay */}
           {isTryingFallback && (
@@ -212,21 +292,64 @@ export default function PlayerModal() {
             </div>
           )}
 
-          {/* Bottom bar */}
-          <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/80 to-transparent">
-            <div className="flex items-center justify-between gap-3">
+          {/* Bottom controls bar */}
+          <div
+            className={`absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/80 to-transparent transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+            onMouseMove={resetControlsTimer}
+            onMouseEnter={() => setShowControls(true)}
+          >
+            <div className="flex items-center gap-3">
+              {/* Play/Pause */}
+              <button onClick={(e) => { e.stopPropagation(); togglePlay(); }} className="p-1.5 rounded-lg hover:bg-white/10 text-white transition-colors" title={isPlaying ? 'Pause (Space)' : 'Play (Space)'}>
+                {isPlaying ? (
+                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/></svg>
+                ) : (
+                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                )}
+              </button>
+
+              {/* Stop */}
+              <button onClick={(e) => { e.stopPropagation(); stopPlayback(); }} className="p-1.5 rounded-lg hover:bg-white/10 text-white/70 hover:text-white transition-colors" title="Stop">
+                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12"/></svg>
+              </button>
+
+              {/* Volume */}
+              <button onClick={(e) => { e.stopPropagation(); toggleMute(); }} className="p-1.5 rounded-lg hover:bg-white/10 text-white/70 hover:text-white transition-colors" title={isMuted ? 'Unmute (M)' : 'Mute (M)'}>
+                {isMuted || volume === 0 ? (
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2"/></svg>
+                ) : volume < 0.5 ? (
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072"/></svg>
+                ) : (
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072M18.364 5.636a9 9 0 010 12.728"/></svg>
+                )}
+              </button>
+
+              {/* Volume slider */}
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                value={isMuted ? 0 : volume}
+                onChange={(e) => { e.stopPropagation(); handleVolumeChange(parseFloat(e.target.value)); }}
+                onClick={(e) => e.stopPropagation()}
+                className="w-20 h-1 accent-white appearance-none bg-white/30 rounded-full cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:rounded-full"
+                title={`Volume: ${Math.round((isMuted ? 0 : volume) * 100)}%`}
+              />
+
               {/* Presence */}
               {watchingWith.length > 0 && (
-                <p className="text-white/60 text-xs truncate">
-                  Watching with: {watchingWith.slice(0, 3).map((u) => `@${u.username}`).join(', ')}
-                  {watchingWith.length > 3 && ` +${watchingWith.length - 3} more`}
+                <p className="text-white/60 text-xs truncate ml-2">
+                  {watchingWith.slice(0, 3).map((u) => `@${u.username}`).join(', ')}
+                  {watchingWith.length > 3 && ` +${watchingWith.length - 3}`}
                 </p>
               )}
+
               <div className="flex-1" />
 
               {/* Report button */}
               <button
-                onClick={reportStream}
+                onClick={(e) => { e.stopPropagation(); reportStream(); }}
                 disabled={reportSent}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs transition-colors ${
                   reportSent

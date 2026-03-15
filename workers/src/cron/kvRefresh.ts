@@ -3,12 +3,15 @@
 //
 // Fetches data from MULTIPLE sources and merges:
 //  1. Free-TV/IPTV (curated, reliable — highest priority)
-//  2. Xumo (389 channels, US FAST)
-//  3. Roku Channel (328 channels, US FAST)
-//  4. Vizio (424 channels, US FAST)
-//  5. LG Channels (1286 channels, multi-region)
-//  6. iptv-org (comprehensive 10k+ — lowest priority)
+//  2. Xumo (US FAST)
+//  3. Roku Channel (US FAST)
+//  4. Vizio (US FAST)
+//  5. LG Channels (multi-region)
+//  6. Pluto TV (free ad-supported streaming)
+//  7. iptv-org (comprehensive 10k+ — lowest priority)
 // Also fetches metadata from iptv-org API for enrichment.
+// Categories are normalized across all sources.
+// iptv-org channels filtered to eng/spa/jpn only.
 // ============================================
 
 const IPTV_API = 'https://iptv-org.github.io/api';
@@ -18,8 +21,9 @@ const XUMO_M3U = 'https://www.apsattv.com/xumo.m3u';
 const ROKU_M3U = 'https://www.apsattv.com/rok.m3u';
 const VIZIO_M3U = 'https://www.apsattv.com/vizio.m3u';
 const LG_M3U = 'https://www.apsattv.com/lg.m3u';
+const PLUTO_M3U = 'https://raw.githubusercontent.com/iptv-org/iptv/master/streams/us_pluto.m3u';
 
-type SourceTag = 'freetv' | 'xumo' | 'roku' | 'vizio' | 'lg' | 'iptv-org';
+type SourceTag = 'freetv' | 'xumo' | 'roku' | 'vizio' | 'lg' | 'pluto' | 'iptv-org';
 
 // ---------- M3U Parser ----------
 
@@ -135,6 +139,63 @@ function extractChannelId(tvgId: string): string {
   return atIdx !== -1 ? tvgId.substring(0, atIdx) : tvgId;
 }
 
+// Normalize category names across sources.
+// Strips source prefixes (e.g. "XUMO🇺🇸: News" → "news"),
+// lowercases, and maps common variations to iptv-org standard categories.
+const CATEGORY_MAP: Record<string, string> = {
+  // Vizio / Xumo variations
+  'local channels': 'general',
+  'news + opinion': 'news',
+  'crime tv': 'series',
+  'crime': 'series',
+  'action & drama': 'movies',
+  'action sports': 'sports',
+  'horror & sci-fi': 'movies',
+  'game shows': 'entertainment',
+  'reality tv': 'entertainment',
+  'reality': 'entertainment',
+  'home & design': 'lifestyle',
+  'food': 'cooking',
+  'food + travel': 'cooking',
+  'black voices. black stories.': 'entertainment',
+  'latino': 'entertainment',
+  'en español': 'entertainment',
+  'westerns & country': 'movies',
+  'tv': 'general',
+  'featured': 'general',
+  'drama': 'movies',
+  'science fiction': 'movies',
+  'action': 'movies',
+  'basketball': 'sports',
+  'weather': 'news',
+  'undefined': 'general',
+  'vod movies (en)': 'movies',
+  'vod italy': 'movies',
+};
+
+// Known source prefixes to strip (Xumo, etc.)
+const SOURCE_PREFIX_RE = /^(?:XUMO|ROKU|VIZIO|LG)[\s🇺🇸🇬🇧🇯🇵🇪🇸🇲🇽🇦🇷🇧🇷🇩🇪🇫🇷🇮🇹]*:\s*/i;
+
+function normalizeCategory(raw: string): string {
+  // Strip source prefix
+  let cat = raw.replace(SOURCE_PREFIX_RE, '').trim().toLowerCase();
+  // Apply mapping
+  return CATEGORY_MAP[cat] || cat;
+}
+
+function normalizeCategories(categories: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const raw of categories) {
+    const normalized = normalizeCategory(raw);
+    if (!seen.has(normalized)) {
+      seen.add(normalized);
+      result.push(normalized);
+    }
+  }
+  return result;
+}
+
 // ---------- Channel building ----------
 
 function buildChannels(
@@ -213,7 +274,7 @@ function buildChannels(
       logo: meta?.logo || info.tvgLogo,
       country: meta?.country || info.tvgCountry.split(';')[0] || '',
       languages,
-      categories: meta?.categories || (info.groupTitle ? info.groupTitle.split(';') : []),
+      categories: normalizeCategories(meta?.categories || (info.groupTitle ? info.groupTitle.split(';') : [])),
       is_nsfw: meta?.is_nsfw ?? false,
       source,
       streams,
@@ -272,13 +333,16 @@ export async function runKvRefresh(kv: KVNamespace): Promise<void> {
     fetchText(ROKU_M3U, 'Roku'),
   ]);
 
-  // Batch 2: More M3U + metadata JSON (4 concurrent)
-  const [vizioText, lgText, channelsData, feedsData] = await Promise.all([
+  // Batch 2: More M3U + Pluto (4 concurrent)
+  const [vizioText, lgText, plutoText, channelsData] = await Promise.all([
     fetchText(VIZIO_M3U, 'Vizio'),
     fetchText(LG_M3U, 'LG'),
+    fetchText(PLUTO_M3U, 'Pluto'),
     fetchJson<IptvOrgChannel[]>(`${IPTV_API}/channels.json`, 'channels.json'),
-    fetchJson<IptvOrgFeed[]>(`${IPTV_API}/feeds.json`, 'feeds.json'),
   ]);
+
+  // Batch 2b: More metadata JSON (2 concurrent)
+  const feedsData = await fetchJson<IptvOrgFeed[]>(`${IPTV_API}/feeds.json`, 'feeds.json');
 
   // Batch 3: Remaining metadata (4 concurrent)
   const [blocklistData, categoriesData, countriesData, languagesData] = await Promise.all([
@@ -304,6 +368,7 @@ export async function runKvRefresh(kv: KVNamespace): Promise<void> {
   const rokuEntries = parseEntries(rokuText, 'Roku');
   const vizioEntries = parseEntries(vizioText, 'Vizio');
   const lgEntries = parseEntries(lgText, 'LG');
+  const plutoEntries = parseEntries(plutoText, 'Pluto');
   const m3uEntries = parseEntries(m3uText, 'iptv-org');
 
   if (freeTvEntries.length === 0 && m3uEntries.length === 0 &&
@@ -345,6 +410,7 @@ export async function runKvRefresh(kv: KVNamespace): Promise<void> {
   const sourceSets: { tag: SourceTag; entries: M3UEntry[] }[] = [
     { tag: 'iptv-org', entries: m3uEntries },     // lowest priority (added first)
     { tag: 'lg', entries: lgEntries },
+    { tag: 'pluto', entries: plutoEntries },
     { tag: 'vizio', entries: vizioEntries },
     { tag: 'roku', entries: rokuEntries },
     { tag: 'xumo', entries: xumoEntries },
