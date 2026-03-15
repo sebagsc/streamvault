@@ -97,32 +97,34 @@ export default function Home() {
 
           {!loading && !error && view === 'grid' && (
             <>
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-3">
-                  <p className="text-text-secondary text-sm">
-                    <span className="text-text-primary font-medium">{total}</span> channels
-                    {pages > 1 && <span className="ml-2 text-text-muted">(page {page}/{pages})</span>}
-                  </p>
-                  <div className="flex gap-1 bg-bg-secondary rounded-lg p-0.5">
-                    {([
-                      { value: '', label: 'All' },
-                      { value: 'freetv', label: 'Free-TV' },
-                      { value: 'iptv-org', label: 'iptv-org' },
-                    ] as const).map((s) => (
-                      <button
-                        key={s.value}
-                        onClick={() => setFilter('source', s.value)}
-                        className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
-                          filters.source === s.value
-                            ? 'bg-accent text-bg-primary'
-                            : 'text-text-secondary hover:text-text-primary'
-                        }`}
-                      >
-                        {s.label}
-                      </button>
-                    ))}
-                  </div>
+              <div className="flex items-center justify-between mb-4 gap-2 flex-wrap">
+                <div className="flex items-center gap-1 bg-bg-secondary rounded-lg p-0.5 overflow-x-auto">
+                  {([
+                    { value: '', label: 'All' },
+                    { value: 'freetv', label: 'Free-TV' },
+                    { value: 'xumo', label: 'Xumo' },
+                    { value: 'roku', label: 'Roku' },
+                    { value: 'vizio', label: 'Vizio' },
+                    { value: 'lg', label: 'LG' },
+                    { value: 'iptv-org', label: 'iptv-org' },
+                  ] as const).map((s) => (
+                    <button
+                      key={s.value}
+                      onClick={() => setFilter('source', s.value)}
+                      className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors whitespace-nowrap ${
+                        filters.source === s.value
+                          ? 'bg-accent text-bg-primary'
+                          : 'text-text-secondary hover:text-text-primary'
+                      }`}
+                    >
+                      {s.label}
+                    </button>
+                  ))}
                 </div>
+                <p className="text-text-secondary text-sm shrink-0">
+                  <span className="text-text-primary font-medium">{total}</span> channels
+                  {pages > 1 && <span className="ml-2 text-text-muted">(page {page}/{pages})</span>}
+                </p>
               </div>
               {filteredChannels.length === 0 ? (
                 <div className="text-center py-20">

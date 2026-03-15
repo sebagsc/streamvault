@@ -1,15 +1,25 @@
 // ============================================
 // KV Refresh — Cron Job (every 6 hours)
 //
-// Fetches data from TWO sources and merges:
-//  - Free-TV/IPTV (curated, reliable streams — priority source)
-//  - iptv-org (comprehensive, 10k+ channels — fallback)
+// Fetches data from MULTIPLE sources and merges:
+//  1. Free-TV/IPTV (curated, reliable — highest priority)
+//  2. Xumo (389 channels, US FAST)
+//  3. Roku Channel (328 channels, US FAST)
+//  4. Vizio (424 channels, US FAST)
+//  5. LG Channels (1286 channels, multi-region)
+//  6. iptv-org (comprehensive 10k+ — lowest priority)
 // Also fetches metadata from iptv-org API for enrichment.
 // ============================================
 
 const IPTV_API = 'https://iptv-org.github.io/api';
 const IPTV_M3U = 'https://iptv-org.github.io/iptv/index.m3u';
 const FREETV_M3U = 'https://raw.githubusercontent.com/Free-TV/IPTV/master/playlist.m3u8';
+const XUMO_M3U = 'https://www.apsattv.com/xumo.m3u';
+const ROKU_M3U = 'https://www.apsattv.com/rok.m3u';
+const VIZIO_M3U = 'https://www.apsattv.com/vizio.m3u';
+const LG_M3U = 'https://www.apsattv.com/lg.m3u';
+
+type SourceTag = 'freetv' | 'xumo' | 'roku' | 'vizio' | 'lg' | 'iptv-org';
 
 // ---------- M3U Parser ----------
 
@@ -88,7 +98,7 @@ export interface ParsedChannel {
   languages: string[];
   categories: string[];
   is_nsfw: boolean;
-  source: 'freetv' | 'iptv-org';
+  source: SourceTag;
   streams: ParsedStream[];
 }
 
@@ -132,7 +142,7 @@ function buildChannels(
   channelMetadata: Map<string, IptvOrgChannel>,
   feedMap: Map<string, IptvOrgFeed>,
   blocklist: Set<string>,
-  source: 'freetv' | 'iptv-org' = 'iptv-org'
+  source: SourceTag = 'iptv-org'
 ): ParsedChannel[] {
   // Group M3U entries by their base channel id (stripping @FeedId)
   const channelMap = new Map<string, { info: M3UEntry; streams: ParsedStream[]; feedIds: Set<string> }>();
@@ -222,39 +232,49 @@ export async function runKvRefresh(kv: KVNamespace): Promise<void> {
   console.log('[KV Refresh] Starting full data refresh...');
   const TTL = 7 * 3600; // 7 hours (slightly > 6h cron interval)
 
-  // Fetch all data sources in parallel (both Free-TV and iptv-org)
-  const [freeTvRes, m3uRes, channelsRes, feedsRes, categoriesRes, countriesRes, languagesRes, blocklistRes, guidesRes] =
+  // Fetch all data sources in parallel
+  const ua = { headers: { 'User-Agent': 'StreamVault/1.0' } };
+  const [freeTvRes, xumoRes, rokuRes, vizioRes, lgRes, m3uRes, channelsRes, feedsRes, categoriesRes, countriesRes, languagesRes, blocklistRes, guidesRes] =
     await Promise.all([
-      fetch(FREETV_M3U, { headers: { 'User-Agent': 'StreamVault/1.0' } }),
-      fetch(IPTV_M3U, { headers: { 'User-Agent': 'StreamVault/1.0' } }),
-      fetch(`${IPTV_API}/channels.json`, { headers: { 'User-Agent': 'StreamVault/1.0' } }),
-      fetch(`${IPTV_API}/feeds.json`, { headers: { 'User-Agent': 'StreamVault/1.0' } }),
-      fetch(`${IPTV_API}/categories.json`, { headers: { 'User-Agent': 'StreamVault/1.0' } }),
-      fetch(`${IPTV_API}/countries.json`, { headers: { 'User-Agent': 'StreamVault/1.0' } }),
-      fetch(`${IPTV_API}/languages.json`, { headers: { 'User-Agent': 'StreamVault/1.0' } }),
-      fetch(`${IPTV_API}/blocklist.json`, { headers: { 'User-Agent': 'StreamVault/1.0' } }),
-      fetch(`${IPTV_API}/guides.json`, { headers: { 'User-Agent': 'StreamVault/1.0' } }),
+      fetch(FREETV_M3U, ua),
+      fetch(XUMO_M3U, ua),
+      fetch(ROKU_M3U, ua),
+      fetch(VIZIO_M3U, ua),
+      fetch(LG_M3U, ua),
+      fetch(IPTV_M3U, ua),
+      fetch(`${IPTV_API}/channels.json`, ua),
+      fetch(`${IPTV_API}/feeds.json`, ua),
+      fetch(`${IPTV_API}/categories.json`, ua),
+      fetch(`${IPTV_API}/countries.json`, ua),
+      fetch(`${IPTV_API}/languages.json`, ua),
+      fetch(`${IPTV_API}/blocklist.json`, ua),
+      fetch(`${IPTV_API}/guides.json`, ua),
     ]);
 
-  // ---------- 1. Parse M3U playlists ----------
-  // Free-TV (curated, reliable)
-  let freeTvEntries: M3UEntry[] = [];
-  if (freeTvRes.ok) {
-    const freeTvText = await freeTvRes.text();
-    freeTvEntries = parseM3U(freeTvText);
-    console.log(`[KV Refresh] Free-TV parsed: ${freeTvEntries.length} stream entries`);
-  } else {
-    console.error(`[KV Refresh] Free-TV fetch failed: HTTP ${freeTvRes.status}`);
-  }
+  // ---------- 1. Parse M3U playlists from all sources ----------
+  const parseSource = async (res: Response, name: string): Promise<M3UEntry[]> => {
+    if (!res.ok) {
+      console.error(`[KV Refresh] ${name} fetch failed: HTTP ${res.status}`);
+      return [];
+    }
+    const text = await res.text();
+    const entries = parseM3U(text);
+    console.log(`[KV Refresh] ${name}: ${entries.length} stream entries`);
+    return entries;
+  };
 
-  // iptv-org (comprehensive)
-  if (!m3uRes.ok) {
-    console.error(`[KV Refresh] iptv-org M3U fetch failed: HTTP ${m3uRes.status}`);
-    if (freeTvEntries.length === 0) return; // no sources at all
+  const freeTvEntries = await parseSource(freeTvRes, 'Free-TV');
+  const xumoEntries = await parseSource(xumoRes, 'Xumo');
+  const rokuEntries = await parseSource(rokuRes, 'Roku');
+  const vizioEntries = await parseSource(vizioRes, 'Vizio');
+  const lgEntries = await parseSource(lgRes, 'LG');
+  const m3uEntries = await parseSource(m3uRes, 'iptv-org');
+
+  if (freeTvEntries.length === 0 && m3uEntries.length === 0 &&
+      xumoEntries.length === 0 && rokuEntries.length === 0) {
+    console.error('[KV Refresh] No sources returned data, aborting');
+    return;
   }
-  const m3uText = m3uRes.ok ? await m3uRes.text() : '';
-  const m3uEntries = m3uRes.ok ? parseM3U(m3uText) : [];
-  console.log(`[KV Refresh] iptv-org M3U parsed: ${m3uEntries.length} stream entries`);
 
   // ---------- 2. Parse channels.json for metadata enrichment ----------
   const channelMetadata = new Map<string, IptvOrgChannel>();
@@ -288,27 +308,33 @@ export async function runKvRefresh(kv: KVNamespace): Promise<void> {
     console.log(`[KV Refresh] Blocklist: ${blocklist.size} blocked channels`);
   }
 
-  // ---------- 5. Build channels from both sources ----------
-  // Free-TV channels (curated, priority source)
-  const freeTvChannels = buildChannels(freeTvEntries, channelMetadata, feedMap, blocklist, 'freetv');
-  console.log(`[KV Refresh] Free-TV: ${freeTvChannels.length} channels`);
+  // ---------- 5. Build channels from all sources ----------
+  // Build each source separately
+  const sourceSets: { tag: SourceTag; entries: M3UEntry[] }[] = [
+    { tag: 'iptv-org', entries: m3uEntries },     // lowest priority (added first)
+    { tag: 'lg', entries: lgEntries },
+    { tag: 'vizio', entries: vizioEntries },
+    { tag: 'roku', entries: rokuEntries },
+    { tag: 'xumo', entries: xumoEntries },
+    { tag: 'freetv', entries: freeTvEntries },     // highest priority (added last, overwrites)
+  ];
 
-  // iptv-org channels (comprehensive fallback)
-  const iptvOrgChannels = buildChannels(m3uEntries, channelMetadata, feedMap, blocklist, 'iptv-org');
-  console.log(`[KV Refresh] iptv-org: ${iptvOrgChannels.length} channels`);
-
-  // Merge: Free-TV takes priority. If same channel id exists, keep Free-TV version
+  // Merge: later sources overwrite earlier ones for same channel id
   const channelById = new Map<string, ParsedChannel>();
-  // Add iptv-org first (will be overwritten by Free-TV)
-  for (const ch of iptvOrgChannels) {
-    channelById.set(ch.id, ch);
+  const sourceCounts: Record<string, number> = {};
+
+  for (const { tag, entries } of sourceSets) {
+    if (entries.length === 0) continue;
+    const built = buildChannels(entries, channelMetadata, feedMap, blocklist, tag);
+    sourceCounts[tag] = built.length;
+    console.log(`[KV Refresh] ${tag}: ${built.length} channels`);
+    for (const ch of built) {
+      channelById.set(ch.id, ch);
+    }
   }
-  // Overwrite with Free-TV (priority)
-  for (const ch of freeTvChannels) {
-    channelById.set(ch.id, ch);
-  }
+
   const channels = [...channelById.values()].sort((a, b) => a.name.localeCompare(b.name));
-  console.log(`[KV Refresh] Merged: ${channels.length} unique channels (${freeTvChannels.length} from Free-TV)`);
+  console.log(`[KV Refresh] Merged: ${channels.length} unique channels`);
 
   // ---------- 6. Store in KV ----------
   const channelsJson = JSON.stringify(channels);

@@ -27,10 +27,9 @@ app.get('/', optionalAuth(), async (c) => {
     let channels: ParsedChannel[] = JSON.parse(channelsRaw);
 
     // --- Filter: Source ---
-    if (source === 'freetv') {
-      channels = channels.filter((ch) => ch.source === 'freetv');
-    } else if (source === 'iptv-org') {
-      channels = channels.filter((ch) => ch.source === 'iptv-org');
+    if (source) {
+      const sources = source.split(',').map((s) => s.trim().toLowerCase());
+      channels = channels.filter((ch) => sources.includes(ch.source));
     }
 
     // --- Filter: NSFW ---
