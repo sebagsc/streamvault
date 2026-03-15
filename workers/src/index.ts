@@ -21,6 +21,7 @@ const app = new Hono<{ Bindings: Env }>();
 app.use('*', async (c, next) => {
   const allowedOrigins = [
     c.env.FRONTEND_URL,
+    'https://tv.pewpew.ar',
     'https://iptv-frontend-2x9.pages.dev',
     'https://iptv-frontend.pages.dev',
     'http://localhost:5173',
