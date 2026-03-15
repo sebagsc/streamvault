@@ -88,6 +88,17 @@ app.post('/api/admin/seed', async (c) => {
   return c.json({ ok: true, user_id: id, totp_uri: totpUri });
 });
 
+// Admin: manually trigger KV refresh
+app.post('/api/admin/refresh-kv', async (c) => {
+  const { secret } = await c.req.json<{ secret: string }>();
+  if (secret !== c.env.JWT_SECRET) {
+    return c.json({ error: 'Invalid secret' }, 403);
+  }
+  await runKvRefresh(c.env.KV);
+  const lastRefresh = await c.env.KV.get('last_refresh');
+  return c.json({ ok: true, last_refresh: lastRefresh });
+});
+
 // 404 fallback
 app.notFound((c) => c.json({ error: 'Not found' }, 404));
 
