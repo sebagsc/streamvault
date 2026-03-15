@@ -232,50 +232,79 @@ export async function runKvRefresh(kv: KVNamespace): Promise<void> {
   console.log('[KV Refresh] Starting full data refresh...');
   const TTL = 7 * 3600; // 7 hours (slightly > 6h cron interval)
 
-  // Fetch data in two batches to stay within Workers subrequest limits
+  // Fetch data in sequential batches of 4 to stay within Workers 6-connection limit.
+  // Each batch is fully consumed (text/json) before starting the next to free connections.
   const ua = { headers: { 'User-Agent': 'StreamVault/1.0' } };
 
-  // Batch 1: M3U playlists + essential metadata
-  const [freeTvRes, m3uRes, channelsRes, feedsRes, blocklistRes] =
-    await Promise.all([
-      fetch(FREETV_M3U, ua),
-      fetch(IPTV_M3U, ua),
-      fetch(`${IPTV_API}/channels.json`, ua),
-      fetch(`${IPTV_API}/feeds.json`, ua),
-      fetch(`${IPTV_API}/blocklist.json`, ua),
-    ]);
+  const fetchText = async (url: string, name: string): Promise<string> => {
+    try {
+      const res = await fetch(url, ua);
+      if (!res.ok) {
+        console.error(`[KV Refresh] ${name} fetch failed: HTTP ${res.status}`);
+        return '';
+      }
+      return await res.text();
+    } catch (err: any) {
+      console.error(`[KV Refresh] ${name} fetch error: ${err.message}`);
+      return '';
+    }
+  };
 
-  // Batch 2: Additional M3U sources + filter metadata
-  const [xumoRes, rokuRes, vizioRes, lgRes, categoriesRes, countriesRes, languagesRes, guidesRes] =
-    await Promise.all([
-      fetch(XUMO_M3U, ua),
-      fetch(ROKU_M3U, ua),
-      fetch(VIZIO_M3U, ua),
-      fetch(LG_M3U, ua),
-      fetch(`${IPTV_API}/categories.json`, ua),
-      fetch(`${IPTV_API}/countries.json`, ua),
-      fetch(`${IPTV_API}/languages.json`, ua),
-      fetch(`${IPTV_API}/guides.json`, ua),
-    ]);
+  const fetchJson = async <T>(url: string, name: string): Promise<T | null> => {
+    try {
+      const res = await fetch(url, ua);
+      if (!res.ok) {
+        console.error(`[KV Refresh] ${name} fetch failed: HTTP ${res.status}`);
+        return null;
+      }
+      return await res.json() as T;
+    } catch (err: any) {
+      console.error(`[KV Refresh] ${name} fetch error: ${err.message}`);
+      return null;
+    }
+  };
+
+  // Batch 1: Core M3U playlists (4 concurrent)
+  const [freeTvText, m3uText, xumoText, rokuText] = await Promise.all([
+    fetchText(FREETV_M3U, 'Free-TV'),
+    fetchText(IPTV_M3U, 'iptv-org'),
+    fetchText(XUMO_M3U, 'Xumo'),
+    fetchText(ROKU_M3U, 'Roku'),
+  ]);
+
+  // Batch 2: More M3U + metadata JSON (4 concurrent)
+  const [vizioText, lgText, channelsData, feedsData] = await Promise.all([
+    fetchText(VIZIO_M3U, 'Vizio'),
+    fetchText(LG_M3U, 'LG'),
+    fetchJson<IptvOrgChannel[]>(`${IPTV_API}/channels.json`, 'channels.json'),
+    fetchJson<IptvOrgFeed[]>(`${IPTV_API}/feeds.json`, 'feeds.json'),
+  ]);
+
+  // Batch 3: Remaining metadata (4 concurrent)
+  const [blocklistData, categoriesData, countriesData, languagesData] = await Promise.all([
+    fetchJson<{ channel: string }[]>(`${IPTV_API}/blocklist.json`, 'blocklist'),
+    fetchJson<{ id: string; name: string }[]>(`${IPTV_API}/categories.json`, 'categories'),
+    fetchJson<{ code: string; name: string; flag: string }[]>(`${IPTV_API}/countries.json`, 'countries'),
+    fetchJson<{ code: string; name: string }[]>(`${IPTV_API}/languages.json`, 'languages'),
+  ]);
+
+  // Batch 4: Guides (1 fetch)
+  const guidesData = await fetchJson<any[]>(`${IPTV_API}/guides.json`, 'guides');
 
   // ---------- 1. Parse M3U playlists from all sources ----------
-  const parseSource = async (res: Response, name: string): Promise<M3UEntry[]> => {
-    if (!res.ok) {
-      console.error(`[KV Refresh] ${name} fetch failed: HTTP ${res.status}`);
-      return [];
-    }
-    const text = await res.text();
+  const parseEntries = (text: string, name: string): M3UEntry[] => {
+    if (!text) return [];
     const entries = parseM3U(text);
     console.log(`[KV Refresh] ${name}: ${entries.length} stream entries`);
     return entries;
   };
 
-  const freeTvEntries = await parseSource(freeTvRes, 'Free-TV');
-  const xumoEntries = await parseSource(xumoRes, 'Xumo');
-  const rokuEntries = await parseSource(rokuRes, 'Roku');
-  const vizioEntries = await parseSource(vizioRes, 'Vizio');
-  const lgEntries = await parseSource(lgRes, 'LG');
-  const m3uEntries = await parseSource(m3uRes, 'iptv-org');
+  const freeTvEntries = parseEntries(freeTvText, 'Free-TV');
+  const xumoEntries = parseEntries(xumoText, 'Xumo');
+  const rokuEntries = parseEntries(rokuText, 'Roku');
+  const vizioEntries = parseEntries(vizioText, 'Vizio');
+  const lgEntries = parseEntries(lgText, 'LG');
+  const m3uEntries = parseEntries(m3uText, 'iptv-org');
 
   if (freeTvEntries.length === 0 && m3uEntries.length === 0 &&
       xumoEntries.length === 0 && rokuEntries.length === 0) {
@@ -285,8 +314,7 @@ export async function runKvRefresh(kv: KVNamespace): Promise<void> {
 
   // ---------- 2. Parse channels.json for metadata enrichment ----------
   const channelMetadata = new Map<string, IptvOrgChannel>();
-  if (channelsRes.ok) {
-    const channelsData: IptvOrgChannel[] = await channelsRes.json();
+  if (channelsData) {
     for (const ch of channelsData) {
       channelMetadata.set(ch.id, ch);
     }
@@ -295,10 +323,8 @@ export async function runKvRefresh(kv: KVNamespace): Promise<void> {
 
   // ---------- 3. Parse feeds.json for language data ----------
   const feedMap = new Map<string, IptvOrgFeed>();
-  if (feedsRes.ok) {
-    const feedsData: IptvOrgFeed[] = await feedsRes.json();
+  if (feedsData) {
     for (const feed of feedsData) {
-      // Key: "ChannelId.cc@FeedId" — matches the full tvg-id from M3U
       const fullId = `${feed.channel}@${feed.id}`;
       feedMap.set(fullId, feed);
     }
@@ -307,8 +333,7 @@ export async function runKvRefresh(kv: KVNamespace): Promise<void> {
 
   // ---------- 4. Parse blocklist ----------
   const blocklist = new Set<string>();
-  if (blocklistRes.ok) {
-    const blocklistData: { channel: string }[] = await blocklistRes.json();
+  if (blocklistData) {
     for (const b of blocklistData) {
       blocklist.add(b.channel);
     }
@@ -364,10 +389,9 @@ export async function runKvRefresh(kv: KVNamespace): Promise<void> {
   await kv.put('channels', channelsJson, { expirationTtl: TTL });
 
   // Build filtered metadata lists from actual channel data (only items with channels)
-  // Parse full reference lists for name lookups
-  const allLanguages: { code: string; name: string }[] = languagesRes.ok ? await languagesRes.json() : [];
-  const allCountries: { code: string; name: string; flag: string }[] = countriesRes.ok ? await countriesRes.json() : [];
-  const allCategories: { id: string; name: string }[] = categoriesRes.ok ? await categoriesRes.json() : [];
+  const allLanguages = languagesData || [];
+  const allCountries = countriesData || [];
+  const allCategories = categoriesData || [];
 
   const langNameMap = new Map(allLanguages.map((l) => [l.code, l.name]));
   const countryNameMap = new Map(allCountries.map((c) => [c.code, { name: c.name, flag: c.flag }]));
@@ -412,8 +436,8 @@ export async function runKvRefresh(kv: KVNamespace): Promise<void> {
     kv.put('languages', JSON.stringify(filteredLanguages), { expirationTtl: TTL }),
     kv.put('countries', JSON.stringify(filteredCountries), { expirationTtl: TTL }),
     kv.put('categories', JSON.stringify(filteredCategories), { expirationTtl: TTL }),
-    guidesRes.ok
-      ? kv.put('guides', JSON.stringify(await guidesRes.json()), { expirationTtl: TTL })
+    guidesData
+      ? kv.put('guides', JSON.stringify(guidesData), { expirationTtl: TTL })
       : Promise.resolve(),
   ]);
 
