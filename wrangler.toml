@@ -59,12 +59,12 @@ database_id = "ae6d0626-caa7-41cd-8b9e-ae3b6a6c5f72"
 # KV NAMESPACE
 # ============================================
 [[kv_namespaces]]
-binding = "KV"
-id = "362b3112719548f3afdec6f4fe5b3517"
+binding = "kv_namespaces"
+id = "bbe315b5eb8246f3b2c089d0cce8e13f"
 
 [[env.production.kv_namespaces]]
-binding = "KV"
-id = "362b3112719548f3afdec6f4fe5b3517"
+binding = "kv_namespaces"
+id = "bbe315b5eb8246f3b2c089d0cce8e13f"
 
 # NOTA: Durable Objects removidos para mantener plan gratuito
 # El chat y presencia ahora usan polling HTTP + D1
