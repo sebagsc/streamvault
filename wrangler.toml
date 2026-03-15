@@ -83,7 +83,7 @@ crons = [
 # ============================================
 [vars]
 TOTP_ISSUER_NAME = "IPTV Stream"
-FRONTEND_URL = "https://your-pages-domain.pages.dev"
+FRONTEND_URL = "https://iptv-frontend-2x9.pages.dev"
 
 # ============================================
 # SECRETS (configurar en Cloudflare Dashboard)
