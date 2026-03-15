@@ -230,7 +230,7 @@ const COUNTRY_LANG_MAP: Record<string, string> = {
   VE: 'spa', EC: 'spa', UY: 'spa', PY: 'spa', BO: 'spa', CR: 'spa',
   PA: 'spa', DO: 'spa', GT: 'spa', HN: 'spa', SV: 'spa', NI: 'spa',
   BR: 'por', PT: 'por',
-  FR: 'fra', BE: 'fra', CH: 'fra',
+  FR: 'fra', BE: 'fra', CH: 'deu', LU: 'fra',
   DE: 'deu', AT: 'deu',
   IT: 'ita',
   JP: 'jpn',
