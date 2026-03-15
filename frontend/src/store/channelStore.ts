@@ -9,6 +9,7 @@ interface ChannelFilters {
   nsfw: boolean;
   search: string;
   show_all: boolean;
+  source: string; // '' | 'freetv' | 'iptv-org'
 }
 
 interface ChannelState {
@@ -43,6 +44,7 @@ export const useChannelStore = create<ChannelState>((set, get) => ({
     nsfw: false,
     search: '',
     show_all: false,
+    source: '',
   },
   view: 'grid',
   activeEvents: {},
@@ -68,6 +70,7 @@ export const useChannelStore = create<ChannelState>((set, get) => ({
       if (filters.nsfw) params.nsfw = true;
       if (filters.search) params.search = filters.search;
       if (filters.show_all) params.show_all = true;
+      if (filters.source) params.source = filters.source;
 
       const data = await channelsApi.list(params);
       set({

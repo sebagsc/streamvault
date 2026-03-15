@@ -113,6 +113,7 @@ export const channels = {
     if (params?.nsfw) qs.set('nsfw', 'true');
     if (params?.search) qs.set('search', params.search);
     if (params?.show_all) qs.set('show_all', 'true');
+    if (params?.source) qs.set('source', params.source);
     if (params?.page) qs.set('page', String(params.page));
     if (params?.limit) qs.set('limit', String(params.limit));
     return request<ChannelListResponse>(`/channels?${qs}`);
@@ -209,6 +210,12 @@ export const meta = {
   languages: () => request<{ code: string; name: string }[]>('/meta/languages'),
 };
 
+// Admin
+export const admin = {
+  refreshSources: () => request<{ ok: boolean; last_refresh: string }>('/admin/refresh-sources', { method: 'POST' }),
+  refreshStatus: () => request<{ last_refresh: string | null }>('/admin/refresh-status'),
+};
+
 // Types
 export interface UserProfile {
   id: string;
@@ -281,6 +288,7 @@ export interface ChannelQueryParams {
   nsfw?: boolean;
   search?: string;
   show_all?: boolean;
+  source?: string;
 }
 
 export interface EpgProgram {

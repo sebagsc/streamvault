@@ -1,16 +1,15 @@
 // ============================================
 // KV Refresh — Cron Job (every 6 hours)
 //
-// Fetches ALL iptv-org data and stores in KV:
-// 1. M3U playlist (index.m3u) → parsed into structured channel+stream data
-// 2. channels.json → rich metadata to enrich M3U entries
-// 3. categories.json, countries.json, languages.json → filter options
-// 4. blocklist.json → channels to hide
-// 5. guides.json → EPG references
+// Fetches data from TWO sources and merges:
+//  - Free-TV/IPTV (curated, reliable streams — priority source)
+//  - iptv-org (comprehensive, 10k+ channels — fallback)
+// Also fetches metadata from iptv-org API for enrichment.
 // ============================================
 
 const IPTV_API = 'https://iptv-org.github.io/api';
 const IPTV_M3U = 'https://iptv-org.github.io/iptv/index.m3u';
+const FREETV_M3U = 'https://raw.githubusercontent.com/Free-TV/IPTV/master/playlist.m3u8';
 
 // ---------- M3U Parser ----------
 
@@ -89,6 +88,7 @@ export interface ParsedChannel {
   languages: string[];
   categories: string[];
   is_nsfw: boolean;
+  source: 'freetv' | 'iptv-org';
   streams: ParsedStream[];
 }
 
@@ -131,7 +131,8 @@ function buildChannels(
   m3uEntries: M3UEntry[],
   channelMetadata: Map<string, IptvOrgChannel>,
   feedMap: Map<string, IptvOrgFeed>,
-  blocklist: Set<string>
+  blocklist: Set<string>,
+  source: 'freetv' | 'iptv-org' = 'iptv-org'
 ): ParsedChannel[] {
   // Group M3U entries by their base channel id (stripping @FeedId)
   const channelMap = new Map<string, { info: M3UEntry; streams: ParsedStream[]; feedIds: Set<string> }>();
@@ -204,6 +205,7 @@ function buildChannels(
       languages,
       categories: meta?.categories || (info.groupTitle ? info.groupTitle.split(';') : []),
       is_nsfw: meta?.is_nsfw ?? false,
+      source,
       streams,
     });
   }
@@ -220,9 +222,10 @@ export async function runKvRefresh(kv: KVNamespace): Promise<void> {
   console.log('[KV Refresh] Starting full data refresh...');
   const TTL = 7 * 3600; // 7 hours (slightly > 6h cron interval)
 
-  // Fetch all data sources in parallel
-  const [m3uRes, channelsRes, feedsRes, categoriesRes, countriesRes, languagesRes, blocklistRes, guidesRes] =
+  // Fetch all data sources in parallel (both Free-TV and iptv-org)
+  const [freeTvRes, m3uRes, channelsRes, feedsRes, categoriesRes, countriesRes, languagesRes, blocklistRes, guidesRes] =
     await Promise.all([
+      fetch(FREETV_M3U, { headers: { 'User-Agent': 'StreamVault/1.0' } }),
       fetch(IPTV_M3U, { headers: { 'User-Agent': 'StreamVault/1.0' } }),
       fetch(`${IPTV_API}/channels.json`, { headers: { 'User-Agent': 'StreamVault/1.0' } }),
       fetch(`${IPTV_API}/feeds.json`, { headers: { 'User-Agent': 'StreamVault/1.0' } }),
@@ -233,14 +236,25 @@ export async function runKvRefresh(kv: KVNamespace): Promise<void> {
       fetch(`${IPTV_API}/guides.json`, { headers: { 'User-Agent': 'StreamVault/1.0' } }),
     ]);
 
-  // ---------- 1. Parse M3U ----------
-  if (!m3uRes.ok) {
-    console.error(`[KV Refresh] M3U fetch failed: HTTP ${m3uRes.status}`);
-    return;
+  // ---------- 1. Parse M3U playlists ----------
+  // Free-TV (curated, reliable)
+  let freeTvEntries: M3UEntry[] = [];
+  if (freeTvRes.ok) {
+    const freeTvText = await freeTvRes.text();
+    freeTvEntries = parseM3U(freeTvText);
+    console.log(`[KV Refresh] Free-TV parsed: ${freeTvEntries.length} stream entries`);
+  } else {
+    console.error(`[KV Refresh] Free-TV fetch failed: HTTP ${freeTvRes.status}`);
   }
-  const m3uText = await m3uRes.text();
-  const m3uEntries = parseM3U(m3uText);
-  console.log(`[KV Refresh] M3U parsed: ${m3uEntries.length} stream entries`);
+
+  // iptv-org (comprehensive)
+  if (!m3uRes.ok) {
+    console.error(`[KV Refresh] iptv-org M3U fetch failed: HTTP ${m3uRes.status}`);
+    if (freeTvEntries.length === 0) return; // no sources at all
+  }
+  const m3uText = m3uRes.ok ? await m3uRes.text() : '';
+  const m3uEntries = m3uRes.ok ? parseM3U(m3uText) : [];
+  console.log(`[KV Refresh] iptv-org M3U parsed: ${m3uEntries.length} stream entries`);
 
   // ---------- 2. Parse channels.json for metadata enrichment ----------
   const channelMetadata = new Map<string, IptvOrgChannel>();
@@ -274,9 +288,27 @@ export async function runKvRefresh(kv: KVNamespace): Promise<void> {
     console.log(`[KV Refresh] Blocklist: ${blocklist.size} blocked channels`);
   }
 
-  // ---------- 5. Build channels ----------
-  const channels = buildChannels(m3uEntries, channelMetadata, feedMap, blocklist);
-  console.log(`[KV Refresh] Built ${channels.length} unique channels`);
+  // ---------- 5. Build channels from both sources ----------
+  // Free-TV channels (curated, priority source)
+  const freeTvChannels = buildChannels(freeTvEntries, channelMetadata, feedMap, blocklist, 'freetv');
+  console.log(`[KV Refresh] Free-TV: ${freeTvChannels.length} channels`);
+
+  // iptv-org channels (comprehensive fallback)
+  const iptvOrgChannels = buildChannels(m3uEntries, channelMetadata, feedMap, blocklist, 'iptv-org');
+  console.log(`[KV Refresh] iptv-org: ${iptvOrgChannels.length} channels`);
+
+  // Merge: Free-TV takes priority. If same channel id exists, keep Free-TV version
+  const channelById = new Map<string, ParsedChannel>();
+  // Add iptv-org first (will be overwritten by Free-TV)
+  for (const ch of iptvOrgChannels) {
+    channelById.set(ch.id, ch);
+  }
+  // Overwrite with Free-TV (priority)
+  for (const ch of freeTvChannels) {
+    channelById.set(ch.id, ch);
+  }
+  const channels = [...channelById.values()].sort((a, b) => a.name.localeCompare(b.name));
+  console.log(`[KV Refresh] Merged: ${channels.length} unique channels (${freeTvChannels.length} from Free-TV)`);
 
   // ---------- 6. Store in KV ----------
   const channelsJson = JSON.stringify(channels);

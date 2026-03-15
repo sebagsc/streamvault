@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import NavBar from '../components/NavBar';
-import { users as usersApi, invite as inviteApi, events as eventsApi, streams as streamsApi, channels as channelsApi } from '../lib/api';
+import { users as usersApi, invite as inviteApi, events as eventsApi, streams as streamsApi, channels as channelsApi, admin as adminApi } from '../lib/api';
 import type { UserRow, InviteLink, EventWithSub, StreamReport, EventInput, Channel } from '../lib/api';
 
 type Tab = 'users' | 'events' | 'streams' | 'settings';
@@ -382,9 +382,63 @@ function StreamsTab() {
 
 // ---- Settings Tab ----
 function SettingsTab() {
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastRefresh, setLastRefresh] = useState<string | null>(null);
+  const [refreshMsg, setRefreshMsg] = useState('');
+
+  useEffect(() => {
+    adminApi.refreshStatus().then((d) => setLastRefresh(d.last_refresh)).catch(() => {});
+  }, []);
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    setRefreshMsg('');
+    try {
+      const res = await adminApi.refreshSources();
+      setLastRefresh(res.last_refresh);
+      setRefreshMsg('Sources refreshed successfully!');
+    } catch (e: any) {
+      setRefreshMsg(`Error: ${e.message || 'Failed to refresh'}`);
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
   return (
-    <div className="card p-8 text-center">
-      <p className="text-text-muted">Settings panel — coming soon</p>
+    <div className="space-y-6">
+      <div className="card p-5">
+        <h3 className="text-sm font-semibold text-text-secondary uppercase tracking-wider mb-4">Channel Sources</h3>
+        <p className="text-text-secondary text-sm mb-4">
+          Channels are fetched from Free-TV (curated) and iptv-org (comprehensive). Data refreshes automatically every 6 hours via cron. You can also trigger a manual refresh.
+        </p>
+        {lastRefresh && (
+          <p className="text-text-muted text-xs mb-4">
+            Last refresh: {new Date(lastRefresh).toLocaleString()}
+          </p>
+        )}
+        <button
+          onClick={handleRefresh}
+          disabled={refreshing}
+          className="btn-primary disabled:opacity-50"
+        >
+          {refreshing ? (
+            <span className="flex items-center gap-2">
+              <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+              Refreshing sources...
+            </span>
+          ) : (
+            'Refresh sources now'
+          )}
+        </button>
+        {refreshMsg && (
+          <p className={`mt-3 text-sm ${refreshMsg.startsWith('Error') ? 'text-status-broken' : 'text-status-online'}`}>
+            {refreshMsg}
+          </p>
+        )}
+      </div>
     </div>
   );
 }

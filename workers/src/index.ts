@@ -12,6 +12,7 @@ import chatRoutes from './routes/chat';
 import presenceRoutes from './routes/presence';
 import { runKvRefresh } from './cron/kvRefresh';
 import { runPushSender } from './cron/pushSender';
+import { requireAdmin } from './lib/middleware';
 import type { Env } from './types';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -88,7 +89,7 @@ app.post('/api/admin/seed', async (c) => {
   return c.json({ ok: true, user_id: id, totp_uri: totpUri });
 });
 
-// Admin: manually trigger KV refresh
+// Admin: manually trigger KV refresh (secret-based, for CLI/cron)
 app.post('/api/admin/refresh-kv', async (c) => {
   const { secret } = await c.req.json<{ secret: string }>();
   if (secret !== c.env.JWT_SECRET) {
@@ -97,6 +98,19 @@ app.post('/api/admin/refresh-kv', async (c) => {
   await runKvRefresh(c.env.KV);
   const lastRefresh = await c.env.KV.get('last_refresh');
   return c.json({ ok: true, last_refresh: lastRefresh });
+});
+
+// Admin: trigger KV refresh (JWT-authenticated, for admin panel)
+app.post('/api/admin/refresh-sources', requireAdmin(), async (c) => {
+  await runKvRefresh(c.env.KV);
+  const lastRefresh = await c.env.KV.get('last_refresh');
+  return c.json({ ok: true, last_refresh: lastRefresh });
+});
+
+// Admin: get last refresh timestamp
+app.get('/api/admin/refresh-status', requireAdmin(), async (c) => {
+  const lastRefresh = await c.env.KV.get('last_refresh');
+  return c.json({ last_refresh: lastRefresh });
 });
 
 // 404 fallback

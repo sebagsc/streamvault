@@ -14,6 +14,7 @@ app.get('/', optionalAuth(), async (c) => {
     const category = c.req.query('category');
     const nsfw = c.req.query('nsfw');
     const search = c.req.query('search');
+    const source = c.req.query('source'); // 'freetv' | 'iptv-org' | '' (all)
     const page = parseInt(c.req.query('page') || '1', 10);
     const limit = Math.min(parseInt(c.req.query('limit') || '100', 10), 500);
 
@@ -24,6 +25,13 @@ app.get('/', optionalAuth(), async (c) => {
     }
 
     let channels: ParsedChannel[] = JSON.parse(channelsRaw);
+
+    // --- Filter: Source ---
+    if (source === 'freetv') {
+      channels = channels.filter((ch) => ch.source === 'freetv');
+    } else if (source === 'iptv-org') {
+      channels = channels.filter((ch) => ch.source === 'iptv-org');
+    }
 
     // --- Filter: NSFW ---
     if (nsfw !== 'true') {
@@ -99,6 +107,7 @@ app.get('/', optionalAuth(), async (c) => {
                 languages: cs.language ? [cs.language] : [],
                 categories: cs.category ? [cs.category] : [],
                 is_nsfw: !!cs.is_nsfw,
+                source: 'iptv-org' as const,
                 streams: [{ url: cs.url, quality: cs.quality || 'custom', http_referrer: '', user_agent: '' }],
               });
             }
