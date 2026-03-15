@@ -3,44 +3,42 @@ import type { Env } from '../types';
 
 const app = new Hono<{ Bindings: Env }>();
 
-// GET /api/meta/categories - Hardcoded fallback
+const IPTV_ORG_API = 'https://iptv-org.github.io/api';
+
+// GET /api/meta/categories - From iptv-org
 app.get('/categories', async (c) => {
-  return c.json([
-    { id: 'entertainment', name: 'Entertainment' },
-    { id: 'news', name: 'News' },
-    { id: 'sports', name: 'Sports' },
-    { id: 'movies', name: 'Movies' },
-    { id: 'music', name: 'Music' },
-    { id: 'documentary', name: 'Documentary' },
-    { id: 'kids', name: 'Kids' },
-    { id: 'education', name: 'Education' },
-  ]);
+  try {
+    const res = await fetch(`${IPTV_ORG_API}/categories.json`);
+    const data = await res.json();
+    return c.json(data);
+  } catch (e) {
+    console.error('Error fetching categories:', e);
+    return c.json([]);
+  }
 });
 
-// GET /api/meta/countries - Hardcoded fallback
+// GET /api/meta/countries - From iptv-org
 app.get('/countries', async (c) => {
-  return c.json([
-    { code: 'US', name: 'United States', flag: '🇺🇸' },
-    { code: 'GB', name: 'United Kingdom', flag: '🇬🇧' },
-    { code: 'ES', name: 'Spain', flag: '🇪🇸' },
-    { code: 'AR', name: 'Argentina', flag: '🇦🇷' },
-    { code: 'MX', name: 'Mexico', flag: '🇲🇽' },
-    { code: 'CO', name: 'Colombia', flag: '🇨🇴' },
-    { code: 'CL', name: 'Chile', flag: '🇨🇱' },
-    { code: 'PE', name: 'Peru', flag: '🇵🇪' },
-  ]);
+  try {
+    const res = await fetch(`${IPTV_ORG_API}/countries.json`);
+    const data = await res.json();
+    return c.json(data);
+  } catch (e) {
+    console.error('Error fetching countries:', e);
+    return c.json([]);
+  }
 });
 
-// GET /api/meta/languages - Hardcoded fallback
+// GET /api/meta/languages - From iptv-org
 app.get('/languages', async (c) => {
-  return c.json([
-    { code: 'eng', name: 'English' },
-    { code: 'spa', name: 'Spanish' },
-    { code: 'por', name: 'Portuguese' },
-    { code: 'fra', name: 'French' },
-    { code: 'deu', name: 'German' },
-    { code: 'ita', name: 'Italian' },
-  ]);
+  try {
+    const res = await fetch(`${IPTV_ORG_API}/languages.json`);
+    const data = await res.json();
+    return c.json(data);
+  } catch (e) {
+    console.error('Error fetching languages:', e);
+    return c.json([]);
+  }
 });
 
 export default app;
