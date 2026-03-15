@@ -140,38 +140,58 @@ function extractChannelId(tvgId: string): string {
 // Normalize category names across sources.
 // Strips source prefixes (e.g. "XUMO🇺🇸: News" → "news"),
 // lowercases, and maps common variations to iptv-org standard categories.
+// Standard iptv-org categories (the only ones we allow)
+const STANDARD_CATEGORIES = new Set([
+  'animation', 'auto', 'business', 'classic', 'comedy', 'cooking',
+  'culture', 'documentary', 'education', 'entertainment', 'family',
+  'general', 'kids', 'legislative', 'lifestyle', 'movies', 'music',
+  'news', 'outdoor', 'relax', 'religious', 'science', 'series',
+  'shop', 'sports', 'travel', 'weather',
+]);
+
 const CATEGORY_MAP: Record<string, string> = {
-  // Vizio / Xumo variations
-  'local channels': 'general',
-  'local news': 'news',
-  'news + opinion': 'news',
-  'news (ar)': 'news',
-  'crime tv': 'series',
-  'crime': 'series',
-  'action & drama': 'movies',
-  'action sports': 'sports',
-  'horror & sci-fi': 'movies',
-  'game shows': 'entertainment',
-  'reality tv': 'entertainment',
-  'reality': 'entertainment',
-  'home & design': 'lifestyle',
-  'food': 'cooking',
-  'food + travel': 'cooking',
-  'black voices. black stories.': 'entertainment',
-  'latino': 'entertainment',
-  'en español': 'entertainment',
-  'westerns & country': 'movies',
-  'tv': 'general',
-  'featured': 'general',
-  'drama': 'movies',
-  'science fiction': 'movies',
-  'action': 'movies',
-  'basketball': 'sports',
-  'weather': 'news',
-  'undefined': 'general',
-  'vod movies (en)': 'movies',
-  'vod italy': 'movies',
-  'public': 'general',
+  // News
+  'local channels': 'general', 'local news': 'news', 'news + opinion': 'news',
+  'news (ar)': 'news', 'noticias': 'news', 'world news': 'news',
+  // Movies & Drama
+  'crime tv': 'series', 'crime': 'series', 'action & drama': 'movies',
+  'horror & sci-fi': 'movies', 'westerns & country': 'movies',
+  'science fiction': 'movies', 'action': 'movies', 'drama': 'movies',
+  'thriller': 'movies', 'romance': 'movies', 'western': 'movies',
+  'vod movies (en)': 'movies', 'vod italy': 'movies',
+  // Entertainment
+  'game shows': 'entertainment', 'reality tv': 'entertainment', 'reality': 'entertainment',
+  'black voices. black stories.': 'entertainment', 'latino': 'entertainment',
+  'en español': 'entertainment', 'pop culture': 'entertainment',
+  'daytime tv': 'entertainment', 'classic tv': 'entertainment',
+  'variety': 'entertainment',
+  // Sports
+  'action sports': 'sports', 'basketball': 'sports', 'combat sports': 'sports',
+  'football': 'sports', 'soccer': 'sports', 'baseball': 'sports',
+  'tennis': 'sports', 'golf': 'sports', 'motorsport': 'sports',
+  'wrestling': 'sports', 'boxing': 'sports', 'cricket': 'sports',
+  'extreme sports': 'sports',
+  // Lifestyle & Home
+  'home & design': 'lifestyle', 'home': 'lifestyle', 'design': 'lifestyle',
+  'health': 'lifestyle', 'fitness': 'lifestyle', 'beauty': 'lifestyle',
+  'fashion': 'lifestyle', 'travel & lifestyle': 'lifestyle',
+  // Cooking & Food
+  'food': 'cooking', 'food + travel': 'cooking', 'food & drink': 'cooking',
+  // Nature & Animals
+  'animals & nature': 'outdoor', 'nature': 'outdoor', 'animals': 'outdoor',
+  'wildlife': 'outdoor', 'fishing': 'outdoor', 'hunting': 'outdoor',
+  // Kids & Family
+  'faith & family': 'family', 'children': 'kids', 'cartoons': 'kids',
+  // Education & Science
+  'history': 'documentary', 'history & learning': 'documentary',
+  'learning': 'education', 'technology': 'science',
+  // Music
+  'music & radio': 'music', 'radio': 'music', 'concert': 'music',
+  // Auto
+  'automotive': 'auto', 'cars': 'auto', 'motoring': 'auto',
+  // General / catch-all
+  'tv': 'general', 'featured': 'general', 'undefined': 'general',
+  'public': 'general', 'miscellaneous': 'general', 'other': 'general',
 };
 
 // Country names that end up as categories from M3U group-title — skip these
@@ -201,10 +221,12 @@ function normalizeCategory(raw: string): string | null {
   let cat = raw.replace(SOURCE_PREFIX_RE, '').trim().toLowerCase();
   // Skip country names used as categories
   if (COUNTRY_CATEGORIES.has(cat)) return null;
-  // Skip VOD-prefixed entries (e.g. "vod italy")
-  if (cat.startsWith('vod ') && !CATEGORY_MAP[cat]) return null;
-  // Apply mapping
-  return CATEGORY_MAP[cat] || cat;
+  // Apply mapping if exists
+  if (CATEGORY_MAP[cat]) return CATEGORY_MAP[cat];
+  // Keep only if it's a standard category
+  if (STANDARD_CATEGORIES.has(cat)) return cat;
+  // Everything else is discarded (not a recognized category)
+  return null;
 }
 
 function normalizeCategories(categories: string[]): string[] {
