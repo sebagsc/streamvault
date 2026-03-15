@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { requireAuth } from '../lib/middleware';
+import { requireAuth, optionalAuth } from '../lib/middleware';
 import type { Env, IptvChannel, IptvStream, CustomStream } from '../types';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -29,8 +29,8 @@ async function getBlocklist(kv: KVNamespace): Promise<Set<string>> {
   return new Set(raw ?? []);
 }
 
-// GET /api/channels
-app.get('/', requireAuth(), async (c) => {
+// GET /api/channels (public)
+app.get('/', optionalAuth(), async (c) => {
   const user = c.get('user');
   const q = c.req.query();
 
@@ -166,8 +166,8 @@ app.get('/', requireAuth(), async (c) => {
   return c.json(merged);
 });
 
-// GET /api/channels/:id/streams
-app.get('/:id/streams', requireAuth(), async (c) => {
+// GET /api/channels/:id/streams (public)
+app.get('/:id/streams', optionalAuth(), async (c) => {
   const { id } = c.req.param();
 
   const streamsRaw = await c.env.KV.get('streams', 'json') as IptvStream[] | null;
@@ -218,8 +218,8 @@ app.get('/:id/streams', requireAuth(), async (c) => {
   return c.json(result);
 });
 
-// GET /api/channels/:id/epg
-app.get('/:id/epg', requireAuth(), async (c) => {
+// GET /api/channels/:id/epg (public)
+app.get('/:id/epg', optionalAuth(), async (c) => {
   const { id } = c.req.param();
   const epgData = await c.env.KV.get(`epg:${id}`, 'json');
   if (!epgData) return c.json({ programs: [] });

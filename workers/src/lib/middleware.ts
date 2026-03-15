@@ -55,3 +55,29 @@ export function corsHeaders(frontendUrl: string) {
     'Access-Control-Allow-Credentials': 'true',
   };
 }
+
+// Optional auth - sets user if token exists, but doesn't require it
+export function optionalAuth() {
+  return async (c: Context<{ Bindings: Env }>, next: Next) => {
+    const token = getCookieToken(c) || getBearerToken(c);
+    if (token) {
+      const payload = await verifyJwt(token, c.env.JWT_SECRET);
+      if (payload) {
+        c.set('user', payload);
+      }
+    }
+    await next();
+  };
+}
+
+function getCookieToken(c: Context): string | undefined {
+  const cookie = c.req.header('cookie') ?? '';
+  const match = cookie.match(/(?:^|;\s*)session=([^;]+)/);
+  return match?.[1];
+}
+
+function getBearerToken(c: Context): string | undefined {
+  const auth = c.req.header('Authorization') ?? '';
+  const match = auth.match(/^Bearer\s+(.+)$/i);
+  return match?.[1];
+}
