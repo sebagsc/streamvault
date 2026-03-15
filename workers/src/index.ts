@@ -16,11 +16,20 @@ import type { Env } from './types';
 
 const app = new Hono<{ Bindings: Env }>();
 
-// CORS
+// CORS - Permitir múltiples orígenes
 app.use('*', async (c, next) => {
-  const origin = c.env.FRONTEND_URL ?? '*';
+  const allowedOrigins = [
+    c.env.FRONTEND_URL,
+    'https://iptv-frontend-2x9.pages.dev',
+    'https://iptv-frontend.pages.dev',
+    'http://localhost:5173',
+  ].filter(Boolean);
+  
+  const origin = c.req.header('origin');
+  const allowOrigin = origin && allowedOrigins.includes(origin) ? origin : allowedOrigins[0] ?? '*';
+  
   const handler = cors({
-    origin,
+    origin: allowOrigin,
     allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowHeaders: ['Content-Type', 'Authorization'],
     credentials: true,
