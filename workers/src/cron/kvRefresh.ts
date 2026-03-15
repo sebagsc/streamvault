@@ -326,6 +326,20 @@ export async function runKvRefresh(kv: KVNamespace): Promise<void> {
     { tag: 'freetv', entries: freeTvEntries },     // highest priority (added last, overwrites)
   ];
 
+  // Language filter: only keep channels in these languages to save KV space.
+  // Applies mainly to iptv-org (10k+ channels); curated sources are kept as-is.
+  const ALLOWED_LANGS = new Set(['eng', 'spa', 'jpn']);
+
+  const passesLangFilter = (ch: ParsedChannel): boolean => {
+    // Curated sources (not iptv-org) are always kept
+    if (ch.source !== 'iptv-org') return true;
+    // Keep if channel has at least one allowed language
+    if (ch.languages.some((l) => ALLOWED_LANGS.has(l))) return true;
+    // Keep if no language info at all (unknown → don't discard)
+    if (ch.languages.length === 0) return true;
+    return false;
+  };
+
   // Merge: later sources overwrite earlier ones for same channel id
   const channelById = new Map<string, ParsedChannel>();
   const sourceCounts: Record<string, number> = {};
@@ -333,9 +347,10 @@ export async function runKvRefresh(kv: KVNamespace): Promise<void> {
   for (const { tag, entries } of sourceSets) {
     if (entries.length === 0) continue;
     const built = buildChannels(entries, channelMetadata, feedMap, blocklist, tag);
-    sourceCounts[tag] = built.length;
-    console.log(`[KV Refresh] ${tag}: ${built.length} channels`);
-    for (const ch of built) {
+    const filtered = built.filter(passesLangFilter);
+    sourceCounts[tag] = filtered.length;
+    console.log(`[KV Refresh] ${tag}: ${built.length} built → ${filtered.length} after lang filter`);
+    for (const ch of filtered) {
       channelById.set(ch.id, ch);
     }
   }
