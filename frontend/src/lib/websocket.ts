@@ -1,4 +1,5 @@
-const WS_BASE = import.meta.env.VITE_WS_URL ?? '';
+// @ts-ignore
+const WS_BASE = (import.meta.env?.VITE_WS_URL as string) || '';
 
 export type WsMessage =
   | { type: 'join'; userId: string; username: string }

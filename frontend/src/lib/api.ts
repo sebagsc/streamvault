@@ -1,4 +1,7 @@
-const API_BASE = import.meta.env.VITE_API_URL ?? '/api';
+// @ts-ignore
+const API_BASE = (import.meta.env?.VITE_API_URL as string) || '/api';
+
+export { API_BASE };
 
 class ApiError extends Error {
   constructor(public status: number, message: string) {
