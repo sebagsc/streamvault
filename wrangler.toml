@@ -59,11 +59,11 @@ database_id = "ae6d0626-caa7-41cd-8b9e-ae3b6a6c5f72"
 # KV NAMESPACE
 # ============================================
 [[kv_namespaces]]
-binding = "kv_namespaces"
+binding = "kv-streamvault"
 id = "bbe315b5eb8246f3b2c089d0cce8e13f"
 
 [[env.production.kv_namespaces]]
-binding = "kv_namespaces"
+binding = "kv-streamvault"
 id = "bbe315b5eb8246f3b2c089d0cce8e13f"
 
 # NOTA: Durable Objects removidos para mantener plan gratuito
