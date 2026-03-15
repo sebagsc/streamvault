@@ -104,10 +104,25 @@ interface IptvOrgChannel {
   name: string;
   logo: string;
   country: string;
-  languages: string[];
   categories: string[];
   is_nsfw: boolean;
   [key: string]: unknown;
+}
+
+interface IptvOrgFeed {
+  channel: string;   // e.g. "123tv.de"
+  id: string;        // e.g. "SD", "Plus1", "Adelaide"
+  languages: string[];
+  broadcast_area: string[];
+  [key: string]: unknown;
+}
+
+// ---------- Helpers ----------
+
+// M3U tvg-id format: "ChannelId.cc@FeedId" → extract channel base id
+function extractChannelId(tvgId: string): string {
+  const atIdx = tvgId.indexOf('@');
+  return atIdx !== -1 ? tvgId.substring(0, atIdx) : tvgId;
 }
 
 // ---------- Channel building ----------
@@ -115,24 +130,32 @@ interface IptvOrgChannel {
 function buildChannels(
   m3uEntries: M3UEntry[],
   channelMetadata: Map<string, IptvOrgChannel>,
+  feedMap: Map<string, IptvOrgFeed>,
   blocklist: Set<string>
 ): ParsedChannel[] {
-  // Group M3U entries by channel (tvg-id or name as fallback)
-  const channelMap = new Map<string, { info: M3UEntry; streams: ParsedStream[] }>();
+  // Group M3U entries by their base channel id (stripping @FeedId)
+  const channelMap = new Map<string, { info: M3UEntry; streams: ParsedStream[]; feedIds: Set<string> }>();
 
   for (const entry of m3uEntries) {
-    const key = entry.tvgId || entry.name;
-    if (!key) continue;
+    if (!entry.tvgId && !entry.name) continue;
+
+    // Derive the base channel id for grouping and metadata lookup
+    const baseChannelId = entry.tvgId ? extractChannelId(entry.tvgId) : '';
+    const key = baseChannelId || entry.name;
 
     // Skip blocked channels
-    if (blocklist.has(key)) continue;
+    if (blocklist.has(key) || blocklist.has(entry.tvgId)) continue;
 
     if (!channelMap.has(key)) {
-      channelMap.set(key, { info: entry, streams: [] });
+      channelMap.set(key, { info: entry, streams: [], feedIds: new Set() });
     }
 
-    // Avoid duplicate stream URLs per channel
     const existing = channelMap.get(key)!;
+
+    // Track feed ids for language lookup
+    if (entry.tvgId) existing.feedIds.add(entry.tvgId);
+
+    // Avoid duplicate stream URLs per channel
     if (!existing.streams.some((s) => s.url === entry.url)) {
       existing.streams.push({
         url: entry.url,
@@ -143,19 +166,43 @@ function buildChannels(
     }
   }
 
-  // Build final channel list, enriching with API metadata where available
+  // Build final channel list, enriching with API metadata
   const channels: ParsedChannel[] = [];
 
-  for (const [key, { info, streams }] of channelMap) {
+  for (const [key, { info, streams, feedIds }] of channelMap) {
+    // Look up channel metadata using the base channel id
     const meta = channelMetadata.get(key);
+
+    // Collect languages from all feeds associated with this channel
+    const languageSet = new Set<string>();
+    for (const fullTvgId of feedIds) {
+      const feed = feedMap.get(fullTvgId);
+      if (feed?.languages) {
+        for (const lang of feed.languages) languageSet.add(lang);
+      }
+    }
+    // Fallback: also look up feeds by base channel id + common feed ids
+    if (languageSet.size === 0) {
+      for (const feedId of ['SD', 'HD', 'FHD']) {
+        const feed = feedMap.get(`${key}@${feedId}`);
+        if (feed?.languages) {
+          for (const lang of feed.languages) languageSet.add(lang);
+        }
+      }
+    }
+
+    // Fallback to M3U tvg-language if still empty
+    const languages = languageSet.size > 0
+      ? [...languageSet]
+      : (info.tvgLanguage ? info.tvgLanguage.split(';').filter(Boolean) : []);
 
     channels.push({
       id: key,
       name: meta?.name || info.name,
       logo: meta?.logo || info.tvgLogo,
       country: meta?.country || info.tvgCountry.split(';')[0] || '',
-      languages: meta?.languages || (info.tvgLanguage ? info.tvgLanguage.split(';') : []),
-      categories: meta?.categories || (info.groupTitle ? [info.groupTitle] : []),
+      languages,
+      categories: meta?.categories || (info.groupTitle ? info.groupTitle.split(';') : []),
       is_nsfw: meta?.is_nsfw ?? false,
       streams,
     });
@@ -174,10 +221,11 @@ export async function runKvRefresh(kv: KVNamespace): Promise<void> {
   const TTL = 7 * 3600; // 7 hours (slightly > 6h cron interval)
 
   // Fetch all data sources in parallel
-  const [m3uRes, channelsRes, categoriesRes, countriesRes, languagesRes, blocklistRes, guidesRes] =
+  const [m3uRes, channelsRes, feedsRes, categoriesRes, countriesRes, languagesRes, blocklistRes, guidesRes] =
     await Promise.all([
       fetch(IPTV_M3U, { headers: { 'User-Agent': 'StreamVault/1.0' } }),
       fetch(`${IPTV_API}/channels.json`, { headers: { 'User-Agent': 'StreamVault/1.0' } }),
+      fetch(`${IPTV_API}/feeds.json`, { headers: { 'User-Agent': 'StreamVault/1.0' } }),
       fetch(`${IPTV_API}/categories.json`, { headers: { 'User-Agent': 'StreamVault/1.0' } }),
       fetch(`${IPTV_API}/countries.json`, { headers: { 'User-Agent': 'StreamVault/1.0' } }),
       fetch(`${IPTV_API}/languages.json`, { headers: { 'User-Agent': 'StreamVault/1.0' } }),
@@ -204,7 +252,19 @@ export async function runKvRefresh(kv: KVNamespace): Promise<void> {
     console.log(`[KV Refresh] Channel metadata: ${channelMetadata.size} entries`);
   }
 
-  // ---------- 3. Parse blocklist ----------
+  // ---------- 3. Parse feeds.json for language data ----------
+  const feedMap = new Map<string, IptvOrgFeed>();
+  if (feedsRes.ok) {
+    const feedsData: IptvOrgFeed[] = await feedsRes.json();
+    for (const feed of feedsData) {
+      // Key: "ChannelId.cc@FeedId" — matches the full tvg-id from M3U
+      const fullId = `${feed.channel}@${feed.id}`;
+      feedMap.set(fullId, feed);
+    }
+    console.log(`[KV Refresh] Feeds: ${feedMap.size} entries`);
+  }
+
+  // ---------- 4. Parse blocklist ----------
   const blocklist = new Set<string>();
   if (blocklistRes.ok) {
     const blocklistData: { channel: string }[] = await blocklistRes.json();
@@ -214,11 +274,11 @@ export async function runKvRefresh(kv: KVNamespace): Promise<void> {
     console.log(`[KV Refresh] Blocklist: ${blocklist.size} blocked channels`);
   }
 
-  // ---------- 4. Build channels ----------
-  const channels = buildChannels(m3uEntries, channelMetadata, blocklist);
+  // ---------- 5. Build channels ----------
+  const channels = buildChannels(m3uEntries, channelMetadata, feedMap, blocklist);
   console.log(`[KV Refresh] Built ${channels.length} unique channels`);
 
-  // ---------- 5. Store in KV ----------
+  // ---------- 6. Store in KV ----------
   const channelsJson = JSON.stringify(channels);
   console.log(`[KV Refresh] Channels data size: ${(channelsJson.length / 1024 / 1024).toFixed(2)} MB`);
   await kv.put('channels', channelsJson, { expirationTtl: TTL });
