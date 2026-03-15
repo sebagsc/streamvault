@@ -8,6 +8,18 @@ declare module 'hono' {
   }
 }
 
+function getCookieToken(c: Context): string | undefined {
+  const cookie = c.req.header('cookie') ?? '';
+  const match = cookie.match(/(?:^|;\s*)session=([^;]+)/);
+  return match?.[1];
+}
+
+function getBearerToken(c: Context): string | undefined {
+  const auth = c.req.header('Authorization') ?? '';
+  const match = auth.match(/^Bearer\s+(.+)$/i);
+  return match?.[1];
+}
+
 export function requireAuth() {
   return async (c: Context<{ Bindings: Env }>, next: Next) => {
     const token = getCookieToken(c) || getBearerToken(c);
@@ -35,18 +47,6 @@ export function requireAdmin() {
   };
 }
 
-function getCookieToken(c: Context): string | undefined {
-  const cookie = c.req.header('cookie') ?? '';
-  const match = cookie.match(/(?:^|;\s*)session=([^;]+)/);
-  return match?.[1];
-}
-
-function getBearerToken(c: Context): string | undefined {
-  const auth = c.req.header('Authorization') ?? '';
-  const match = auth.match(/^Bearer\s+(.+)$/i);
-  return match?.[1];
-}
-
 export function corsHeaders(frontendUrl: string) {
   return {
     'Access-Control-Allow-Origin': frontendUrl,
@@ -68,16 +68,4 @@ export function optionalAuth() {
     }
     await next();
   };
-}
-
-function getCookieToken(c: Context): string | undefined {
-  const cookie = c.req.header('cookie') ?? '';
-  const match = cookie.match(/(?:^|;\s*)session=([^;]+)/);
-  return match?.[1];
-}
-
-function getBearerToken(c: Context): string | undefined {
-  const auth = c.req.header('Authorization') ?? '';
-  const match = auth.match(/^Bearer\s+(.+)$/i);
-  return match?.[1];
 }
