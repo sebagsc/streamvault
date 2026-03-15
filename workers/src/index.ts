@@ -90,21 +90,20 @@ app.post('/api/admin/seed', async (c) => {
 });
 
 // Admin: manually trigger KV refresh (secret-based, for CLI/cron)
+// Uses waitUntil to run in background with extended CPU budget (30s)
 app.post('/api/admin/refresh-kv', async (c) => {
   const { secret } = await c.req.json<{ secret: string }>();
   if (secret !== c.env.JWT_SECRET) {
     return c.json({ error: 'Invalid secret' }, 403);
   }
-  await runKvRefresh(c.env.KV);
-  const lastRefresh = await c.env.KV.get('last_refresh');
-  return c.json({ ok: true, last_refresh: lastRefresh });
+  c.executionCtx.waitUntil(runKvRefresh(c.env.KV));
+  return c.json({ ok: true, message: 'Refresh started in background' });
 });
 
 // Admin: trigger KV refresh (JWT-authenticated, for admin panel)
 app.post('/api/admin/refresh-sources', requireAdmin(), async (c) => {
-  await runKvRefresh(c.env.KV);
-  const lastRefresh = await c.env.KV.get('last_refresh');
-  return c.json({ ok: true, last_refresh: lastRefresh });
+  c.executionCtx.waitUntil(runKvRefresh(c.env.KV));
+  return c.json({ ok: true, message: 'Refresh started in background' });
 });
 
 // Admin: get last refresh timestamp

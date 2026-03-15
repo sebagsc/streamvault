@@ -394,9 +394,8 @@ function SettingsTab() {
     setRefreshing(true);
     setRefreshMsg('');
     try {
-      const res = await adminApi.refreshSources();
-      setLastRefresh(res.last_refresh);
-      setRefreshMsg('Sources refreshed successfully!');
+      await adminApi.refreshSources();
+      setRefreshMsg('Refresh started! It may take a minute to complete. Check back shortly.');
     } catch (e: any) {
       setRefreshMsg(`Error: ${e.message || 'Failed to refresh'}`);
     } finally {
