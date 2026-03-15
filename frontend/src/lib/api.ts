@@ -205,9 +205,18 @@ export const push = {
 
 // Meta
 export const meta = {
-  categories: () => request<{ id: string; name: string }[]>('/meta/categories'),
-  countries: () => request<{ code: string; name: string; flag: string }[]>('/meta/countries'),
-  languages: () => request<{ code: string; name: string }[]>('/meta/languages'),
+  categories: (source?: string) => {
+    const qs = source ? `?source=${encodeURIComponent(source)}` : '';
+    return request<{ id: string; name: string; count?: number }[]>(`/meta/categories${qs}`);
+  },
+  countries: (source?: string) => {
+    const qs = source ? `?source=${encodeURIComponent(source)}` : '';
+    return request<{ code: string; name: string; flag: string; count?: number }[]>(`/meta/countries${qs}`);
+  },
+  languages: (source?: string) => {
+    const qs = source ? `?source=${encodeURIComponent(source)}` : '';
+    return request<{ code: string; name: string; count?: number }[]>(`/meta/languages${qs}`);
+  },
 };
 
 // Admin

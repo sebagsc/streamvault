@@ -18,15 +18,27 @@ export default function FiltersSidebar({ isOpen, onClose }: Props) {
   const [countrySearch, setCountrySearch] = useState('');
   const [showAllCats, setShowAllCats] = useState(false);
 
+  // Refetch filter options whenever the source filter changes
   useEffect(() => {
-    Promise.all([meta.countries(), meta.languages(), meta.categories()])
+    const source = filters.source || undefined;
+    Promise.all([meta.countries(source), meta.languages(source), meta.categories(source)])
       .then(([c, l, cat]) => {
         setCountries(c);
         setLanguages(l);
         setCategories(cat);
+        // Clear selected filters that no longer exist in the new source
+        if (filters.country && !c.some((x) => x.code === filters.country)) {
+          setFilter('country', '');
+        }
+        if (filters.language && !l.some((x) => x.code === filters.language)) {
+          setFilter('language', '');
+        }
+        if (filters.category && !cat.some((x) => x.id === filters.category)) {
+          setFilter('category', '');
+        }
       })
       .catch(() => {});
-  }, []);
+  }, [filters.source]);
 
   const filteredLangs = useMemo(() => {
     if (!langSearch) return languages;
