@@ -170,7 +170,10 @@ const CATEGORY_MAP: Record<string, string> = {
   'football': 'sports', 'soccer': 'sports', 'baseball': 'sports',
   'tennis': 'sports', 'golf': 'sports', 'motorsport': 'sports',
   'wrestling': 'sports', 'boxing': 'sports', 'cricket': 'sports',
-  'extreme sports': 'sports',
+  'extreme sports': 'sports', 'billiards': 'sports', 'bullfighting': 'sports',
+  'mma': 'sports', 'racing': 'sports', 'volleyball': 'sports',
+  'rugby': 'sports', 'hockey': 'sports', 'swimming': 'sports',
+  'computers': 'science', 'tech': 'science',
   // Lifestyle & Home
   'home & design': 'lifestyle', 'home': 'lifestyle', 'design': 'lifestyle',
   'health': 'lifestyle', 'fitness': 'lifestyle', 'beauty': 'lifestyle',
@@ -215,6 +218,113 @@ const COUNTRY_CATEGORIES = new Set([
 
 // Known source prefixes to strip (Xumo, etc.)
 const SOURCE_PREFIX_RE = /^(?:XUMO|ROKU|VIZIO|LG)[\s🇺🇸🇬🇧🇯🇵🇪🇸🇲🇽🇦🇷🇧🇷🇩🇪🇫🇷🇮🇹]*:\s*/i;
+
+// ---------- LG Metadata Enrichment ----------
+// LG M3U has NO tvg-id, group-title, tvg-language, or tvg-country.
+// We infer metadata from the channel name pattern: "Channel Name (CC) [Geo]"
+
+// Country code → primary language mapping (ISO 639-3)
+const COUNTRY_LANG_MAP: Record<string, string> = {
+  US: 'eng', CA: 'eng', GB: 'eng', AU: 'eng', NZ: 'eng', IE: 'eng',
+  AR: 'spa', MX: 'spa', ES: 'spa', CL: 'spa', CO: 'spa', PE: 'spa',
+  VE: 'spa', EC: 'spa', UY: 'spa', PY: 'spa', BO: 'spa', CR: 'spa',
+  PA: 'spa', DO: 'spa', GT: 'spa', HN: 'spa', SV: 'spa', NI: 'spa',
+  BR: 'por', PT: 'por',
+  FR: 'fra', BE: 'fra', CH: 'fra',
+  DE: 'deu', AT: 'deu',
+  IT: 'ita',
+  JP: 'jpn',
+  KR: 'kor',
+  IN: 'hin', NL: 'nld', SE: 'swe', NO: 'nor', DK: 'dan', FI: 'fin',
+  PL: 'pol', RO: 'ron', TR: 'tur', RU: 'rus', GR: 'ell', CZ: 'ces',
+  HU: 'hun', TH: 'tha', PH: 'fil', ID: 'ind', MY: 'msa',
+};
+
+// Language keywords in channel names → ISO 639-3
+const NAME_LANG_MAP: Record<string, string> = {
+  english: 'eng', spanish: 'spa', portuguese: 'por', french: 'fra',
+  german: 'deu', italian: 'ita', japanese: 'jpn', korean: 'kor',
+  hindi: 'hin', arabic: 'ara', chinese: 'zho', russian: 'rus',
+  dutch: 'nld', swedish: 'swe', turkish: 'tur', thai: 'tha',
+  finnish: 'fin', danish: 'dan', norwegian: 'nor', polish: 'pol',
+  greek: 'ell', czech: 'ces', hungarian: 'hun', romanian: 'ron',
+};
+
+// Keyword patterns in channel names → standard category
+const NAME_CATEGORY_PATTERNS: [RegExp, string][] = [
+  [/\bnews\b/i, 'news'],
+  [/\bsport/i, 'sports'],
+  [/\bmovie/i, 'movies'],
+  [/\bcinema\b/i, 'movies'],
+  [/\bfilm/i, 'movies'],
+  [/\bkids?\b/i, 'kids'],
+  [/\bbaby\b/i, 'kids'],
+  [/\bcartoon/i, 'kids'],
+  [/\banime\b/i, 'animation'],
+  [/\bmusic\b/i, 'music'],
+  [/\bjazz\b/i, 'music'],
+  [/\bcook/i, 'cooking'],
+  [/\bfood\b/i, 'cooking'],
+  [/\brecipe/i, 'cooking'],
+  [/\bweather\b/i, 'weather'],
+  [/\btravel/i, 'travel'],
+  [/\bcomedy\b/i, 'comedy'],
+  [/\bdocument/i, 'documentary'],
+  [/\bnature\b/i, 'outdoor'],
+  [/\bwild(?:life)?\b/i, 'outdoor'],
+  [/\bscience\b/i, 'science'],
+  [/\beducat/i, 'education'],
+  [/\bfashion\b/i, 'lifestyle'],
+  [/\blifestyle\b/i, 'lifestyle'],
+  [/\bhealth\b/i, 'lifestyle'],
+  [/\bfitness\b/i, 'lifestyle'],
+  [/\bshop/i, 'shop'],
+  [/\breligio/i, 'religious'],
+  [/\bfaith\b/i, 'religious'],
+  [/\bchurch\b/i, 'religious'],
+  [/\bclassic\b/i, 'classic'],
+  [/\breality\b/i, 'entertainment'],
+  [/\bgame\s*show/i, 'entertainment'],
+  [/\blifetime\b/i, 'series'],
+  [/\bdrama\b/i, 'series'],
+];
+
+function enrichLgChannel(ch: ParsedChannel): void {
+  const name = ch.name;
+
+  // Extract country code from (XX) pattern
+  const countryMatch = name.match(/\(([A-Z]{2})\)/);
+  if (countryMatch && !ch.country) {
+    ch.country = countryMatch[1];
+  }
+
+  // Infer language from name keywords
+  if (ch.languages.length === 0) {
+    const nameLower = name.toLowerCase();
+    for (const [keyword, langCode] of Object.entries(NAME_LANG_MAP)) {
+      if (nameLower.includes(keyword)) {
+        ch.languages = [langCode];
+        break;
+      }
+    }
+  }
+
+  // Fallback: infer language from country code
+  if (ch.languages.length === 0 && ch.country) {
+    const lang = COUNTRY_LANG_MAP[ch.country];
+    if (lang) ch.languages = [lang];
+  }
+
+  // Infer categories from name keywords
+  if (ch.categories.length === 0) {
+    for (const [pattern, category] of NAME_CATEGORY_PATTERNS) {
+      if (pattern.test(name)) {
+        ch.categories = [category];
+        break;
+      }
+    }
+  }
+}
 
 function normalizeCategory(raw: string): string | null {
   // Strip source prefix
@@ -479,6 +589,16 @@ export async function runKvRefresh(kv: KVNamespace): Promise<void> {
   for (const { tag, entries } of sourceSets) {
     if (entries.length === 0) continue;
     const built = buildChannels(entries, channelMetadata, feedMap, blocklist, tag);
+
+    // Enrich LG channels with metadata parsed from channel names
+    if (tag === 'lg') {
+      for (const ch of built) enrichLgChannel(ch);
+      const withCountry = built.filter((ch) => ch.country).length;
+      const withLang = built.filter((ch) => ch.languages.length > 0).length;
+      const withCat = built.filter((ch) => ch.categories.length > 0).length;
+      console.log(`[KV Refresh] LG enrichment: ${withCountry} with country, ${withLang} with language, ${withCat} with category`);
+    }
+
     const filtered = built.filter(passesLangFilter);
     sourceCounts[tag] = filtered.length;
     console.log(`[KV Refresh] ${tag}: ${built.length} built → ${filtered.length} after lang filter`);
